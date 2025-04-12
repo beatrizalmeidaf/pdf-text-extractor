@@ -1,7 +1,7 @@
 # <p align="center">PDF Text Extractor 📄</p>
 
 <p align="center">
-  <img src="![Image](https://github.com/user-attachments/assets/ff637581-a9d4-472f-b7f1-92f8e90763c8)" alt="Logo da aplicação" width="200"/>
+  <img src="https://github.com/user-attachments/assets/ff637581-a9d4-472f-b7f1-92f8e90763c8" alt="Logo da aplicação" width="200"/>
 </p>
 
 <p align="center">
