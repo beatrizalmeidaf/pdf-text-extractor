@@ -165,7 +165,6 @@ def create_txt_file(text, filename):
         return None
 
 # interface Gradio
-# interface Gradio
 with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
