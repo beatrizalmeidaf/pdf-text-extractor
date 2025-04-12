@@ -8,6 +8,11 @@ import shutil
 import os
 from datetime import datetime
 
+# configuração Tika
+os.environ['TIKA_CLIENT_ONLY'] = 'True'
+os.environ['TIKA_SERVER_ENDPOINT'] = 'http://localhost:9998'
+parser.from_file = lambda file_path, serverEndpoint=None: parser.from_file(file_path, serverEndpoint=serverEndpoint, timeout=300)
+
 # inicializa FastAPI 
 app = FastAPI(
     title="PDF Text Extractor",
