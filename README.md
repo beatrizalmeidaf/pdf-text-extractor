@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.103.1-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
-**PDF Text Extractor** é uma API para extração automatizada de texto de arquivos PDF, com limpeza inteligente de formatações indesejadas como números de página, preservando a estrutura original do conteúdo.
+**PDF Text Extractor** é uma API para extração automatizada de texto de arquivos PDF, com limpeza inteligente de formatações indesejadas (como números de página), preservando a estrutura original do conteúdo.
 
 ---
 
@@ -27,34 +27,85 @@
 
 ---
 
-## Integração com Python
+## Uso da API com Python (via `requests`)
 
-Você pode consumir a API diretamente em qualquer aplicação Python:
+Você também pode integrar a API em qualquer script Python:
+
+### 1. Instale a dependência:
+
+```bash
+pip install requests
+```
+
+### 2. Exemplo de uso:
 
 ```python
 import requests
+import os
 
-API_URL = "https://pdf-text-extractor-production-ad51.up.railway.app/run/predict"
-pdf_file_path = "seuarquivo.pdf"
+# Caminho do seu PDF
+PDF_PATH = "seuarquivo.pdf"
 
-with open(pdf_file_path, "rb") as f:
-    files = {"data": (pdf_file_path, f, "application/pdf")}
-    response = requests.post(API_URL, files=files)
+# Etapa 1: Enviar o PDF para o servidor
+upload_url = "https://pdf-text-extractor-production-ad51.up.railway.app/upload"
+with open(PDF_PATH, 'rb') as f:
+    files = {'files': (os.path.basename(PDF_PATH), f, 'application/pdf')}
+    upload_response = requests.post(upload_url, files=files)
+
+if upload_response.status_code != 200:
+    print("Erro no upload:", upload_response.text)
+    exit()
+
+file_path = upload_response.json()[0]
+file_url = f"https://pdf-text-extractor-production-ad51.up.railway.app/file={file_path}"
+
+# Etapa 2: Solicitar extração do texto
+predict_url = "https://pdf-text-extractor-production-ad51.up.railway.app/run/predict"
+payload = {
+    "data": [{
+        "data": file_url,
+        "name": file_path,
+        "size": os.path.getsize(PDF_PATH),
+        "orig_name": os.path.basename(PDF_PATH),
+        "is_file": True
+    }],
+    "event_data": None,
+    "fn_index": 2,
+    "session_hash": "t7xa5iimde"  # Veja abaixo como atualizar esse valor, se necessário
+}
+
+headers = {
+    "Content-Type": "application/json",
+    "Referer": "https://pdf-text-extractor-production-ad51.up.railway.app/",
+    "Origin": "https://pdf-text-extractor-production-ad51.up.railway.app",
+    "User-Agent": "Mozilla/5.0"
+}
+
+response = requests.post(predict_url, headers=headers, json=payload)
 
 if response.status_code == 200:
-    result = response.json()
-    texto_extraido = result["data"][0]
-    nome_arquivo = result["data"][1]
-    print(f"Texto extraído:\n{texto_extraido}")
+    extracted_text = response.json()["data"][0]
+    with open("texto_extraido.txt", "w", encoding="utf-8") as txt_file:
+        txt_file.write(extracted_text)
+    print("Texto extraído salvo em 'texto_extraido.txt'")
 else:
-    print(f"Erro: {response.status_code} - {response.text}")
+    print("Erro na predição:", response.status_code, response.text)
 ```
+
+### Como obter o `session_hash`
+
+Caso o valor `"t7xa5iimde"` não funcione, você pode:
+
+1. Abrir a URL da aplicação: [https://pdf-text-extractor-production-ad51.up.railway.app](https://pdf-text-extractor-production-ad51.up.railway.app)  
+2. Clicar com o botão direito > **Inspecionar (F12)**  
+3. Procurar por `session_hash` no código-fonte da página  
+4. Copiar o valor e substituir no seu script
 
 ---
 
 ## Execução com Docker
 
-Para rodar localmente:
+Para rodar a aplicação localmente:
 
 ```bash
 docker build -t pdf-text-extractor .
@@ -67,11 +118,11 @@ Acesse em: [http://localhost:7860](http://localhost:7860)
 
 ## Tecnologias Utilizadas
 
-- [FastAPI](https://fastapi.tiangolo.com/) – Backend rápido e moderno
-- [Gradio](https://www.gradio.app/) – Interface web para aplicações de ML/API
-- [Tika](https://tika.apache.org/) – Extração robusta de texto de PDFs
-- [Uvicorn](https://www.uvicorn.org/) – ASGI server rápido e leve
-- [Gunicorn](https://gunicorn.org/) – WSGI server para produção
-- [python-multipart](https://andrew-d.github.io/python-multipart/) – Upload de arquivos
-- [Requests](https://docs.python-requests.org/) – Cliente HTTP para integração
-- [python-dotenv](https://pypi.org/project/python-dotenv/) – Gerenciamento de variáveis de ambiente
+- [FastAPI](https://fastapi.tiangolo.com/) – Backend moderno e performático
+- [Gradio](https://www.gradio.app/) – Interface web interativa para APIs e modelos ML
+- [Apache Tika](https://tika.apache.org/) – Extração robusta de texto de PDFs
+- [Uvicorn](https://www.uvicorn.org/) – ASGI server leve e rápido
+- [Gunicorn](https://gunicorn.org/) – Servidor WSGI confiável para produção
+- [python-multipart](https://andrew-d.github.io/python-multipart/) – Suporte a upload de arquivos
+- [Requests](https://docs.python-requests.org/) – Cliente HTTP simples e poderoso
+- [python-dotenv](https://pypi.org/project/python-dotenv/) – Carregamento de variáveis de ambiente via `.env`

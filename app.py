@@ -207,8 +207,10 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         outputs=[file_output]
     )
 
+
 # iniciar o aplicativo
 if __name__ == "__main__":
     # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
+    
     demo.launch(server_name="0.0.0.0", server_port=port)
