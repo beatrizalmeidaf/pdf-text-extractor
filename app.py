@@ -6,16 +6,16 @@ import tempfile
 import logging
 from tika import parser
 
-# Configurar logging
+# configurar logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuração Tika
+# configuração Tika
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
 logger.info("Iniciando aplicação com Apache Tika")
 
-# Criar diretórios temporários
+# criar diretórios temporários
 TEMP_DIR = tempfile.mkdtemp()
 logger.info(f"Diretório temporário criado: {TEMP_DIR}")
 
@@ -70,13 +70,13 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     """Extrai texto do PDF usando Apache Tika"""
     logger.info(f"Extraindo texto do arquivo: {pdf_path}")
     try:
-        # Tentar usar Tika
+        # tenta usar Tika
         parsed_pdf = parser.from_file(pdf_path)
         text_content = parsed_pdf.get('content', '') or ''
         
         if not text_content:
             logger.warning("Nenhum texto extraído do PDF.")
-            return "Não foi possível extrair texto deste PDF."
+            return "Não foi possível extrair texto desse PDF."
         
         # divide o texto em páginas
         pages = text_content.split('\f')
@@ -100,47 +100,83 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def process_pdf(pdf_file):
     """Processa o arquivo PDF enviado e retorna o texto extraído"""
     if pdf_file is None:
-        return "Nenhum arquivo enviado."
-    
-    # Salvar o arquivo temporariamente
-    temp_path = os.path.join(TEMP_DIR, f"upload_{os.path.basename(pdf_file.name)}")
+        return "Nenhum arquivo enviado.", None
     
     try:
-        with open(temp_path, "wb") as f:
-            f.write(pdf_file.read())
+        logger.info(f"Processando arquivo: {pdf_file.name}")
         
-        # Extrair texto
+        # salva o arquivo temporariamente
+        temp_path = os.path.join(TEMP_DIR, os.path.basename(pdf_file.name))
+        
+        # gradio disponibiliza o caminho do arquivo em pdf_file.name
+        shutil.copy(pdf_file.name, temp_path)
+        
+        # extrair texto
         extracted_text = extract_text_from_pdf(temp_path)
-        return extracted_text
+        
+        # gerar nome do arquivo de saída
+        output_filename = os.path.splitext(os.path.basename(pdf_file.name))[0] + ".txt"
+        
+        return extracted_text, output_filename
     except Exception as e:
         logger.error(f"Erro ao processar arquivo: {str(e)}")
-        return f"Erro ao processar o arquivo: {str(e)}"
-    finally:
-        # Limpar arquivo temporário
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        return f"Erro ao processar o arquivo: {str(e)}", None
 
-# Interface Gradio
+def create_txt_file(text, filename):
+    """Cria um arquivo de texto para download"""
+    if not text or not filename:
+        return None
+    
+    try:
+        # criar arquivo temporário para download
+        output_path = os.path.join(TEMP_DIR, filename)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        
+        return output_path
+    except Exception as e:
+        logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
+        return None
+
+# interface gradio
 with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
-    with gr.Row():
-        pdf_input = gr.File(label="Arquivo PDF")
+    pdf_input = gr.File(label="Arquivo PDF")
+    output_filename = gr.State(value=None)
     
     with gr.Row():
-        extract_btn = gr.Button("Extrair Texto")
+        extract_btn = gr.Button("Extrair Texto", variant="primary")
+    
+    text_output = gr.Textbox(label="Texto Extraído", lines=20)
     
     with gr.Row():
-        text_output = gr.Textbox(label="Texto Extraído", lines=20)
+        download_btn = gr.Button("Baixar como TXT", variant="secondary")
     
+    file_output = gr.File(label="Arquivo para Download", visible=False)
+    
+    # função de extração
     extract_btn.click(
         fn=process_pdf,
         inputs=[pdf_input],
-        outputs=[text_output]
+        outputs=[text_output, output_filename]
+    )
+    
+    # função de download
+    def prepare_download(text, filename):
+        if not text or text.startswith("Erro") or not filename:
+            return None
+        
+        return create_txt_file(text, filename)
+    
+    download_btn.click(
+        fn=prepare_download,
+        inputs=[text_output, output_filename],
+        outputs=[file_output]
     )
 
-# Iniciar o aplicativo
+# iniciar o aplicativo
 if __name__ == "__main__":
-    # Esta configuração é vital para o funcionamento na Hugging Face Spaces
+    # configuração é vital para o funcionamento na Hugging Face Spaces
     demo.launch(server_name="0.0.0.0", server_port=7860)
