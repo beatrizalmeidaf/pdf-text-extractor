@@ -1,43 +1,23 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
-from tika import parser
-import re
-import shutil
+import gradio as gr
 import os
-from datetime import datetime
+import shutil
+import re
+import tempfile
+import logging
+from tika import parser
 
-# configuração Tika
+# Configurar logging
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Configuração Tika
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
-os.environ['TIKA_SERVER_ENDPOINT'] = 'http://localhost:9998'
+logger.info("Iniciando aplicação com Apache Tika")
 
-# inicializa FastAPI 
-app = FastAPI(
-    title="PDF Text Extractor",
-    description="API para extração de texto de arquivos PDF",
-    version="1.0.0"
-)
-
-# permite que aplicações em diferentes domínios acessem a API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# cria diretorios
-UPLOAD_DIR = "uploads"
-OUTPUT_DIR = "output"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# HTML template
-with open('index.html', 'r', encoding='utf-8') as f:
-    HTML_CONTENT = f.read()
-
+# Criar diretórios temporários
+TEMP_DIR = tempfile.mkdtemp()
+logger.info(f"Diretório temporário criado: {TEMP_DIR}")
 
 def is_page_number_line(line: str, max_page_num: int = 1000) -> bool:
     """
@@ -87,12 +67,16 @@ def clean_page_numbers(text: str) -> str:
     return '\n'.join(cleaned_lines)
 
 def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extrai texto do PDF usando Apache Tika"""
+    logger.info(f"Extraindo texto do arquivo: {pdf_path}")
     try:
+        # Tentar usar Tika
         parsed_pdf = parser.from_file(pdf_path)
-        text_content = parsed_pdf.get('content', '') or parsed_pdf.get('text', '')
+        text_content = parsed_pdf.get('content', '') or ''
         
         if not text_content:
-            raise ValueError("Nenhum texto foi extraído do PDF.")
+            logger.warning("Nenhum texto extraído do PDF.")
+            return "Não foi possível extrair texto deste PDF."
         
         # divide o texto em páginas
         pages = text_content.split('\f')
@@ -105,79 +89,58 @@ def extract_text_from_pdf(pdf_path: str) -> str:
                 cleaned_pages.append(cleaned_page.strip())
         
         # junta as páginas com uma quebra de linha dupla entre elas
-        final_text = '\n'.join(cleaned_pages)
+        final_text = '\n\n'.join(cleaned_pages)
+        logger.info("Texto extraído com sucesso")
         
         return final_text
     except Exception as e:
-        raise ValueError(f"Erro ao extrair texto: {str(e)}")
+        logger.error(f"Erro na extração de texto: {str(e)}")
+        return f"Erro ao extrair texto: {str(e)}"
 
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    """Retorna a página HTML como resposta"""
-    return HTML_CONTENT
-
-@app.post("/upload/")
-async def upload_pdf(file: UploadFile = File(...)):
-    """
-    Rota de Upload de PDF
-    """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="O arquivo enviado não é um PDF."
-        )
+def process_pdf(pdf_file):
+    """Processa o arquivo PDF enviado e retorna o texto extraído"""
+    if pdf_file is None:
+        return "Nenhum arquivo enviado."
     
-    pdf_path = os.path.join(UPLOAD_DIR, file.filename)
+    # Salvar o arquivo temporariamente
+    temp_path = os.path.join(TEMP_DIR, f"upload_{os.path.basename(pdf_file.name)}")
     
     try:
-        with open(pdf_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        with open(temp_path, "wb") as f:
+            f.write(pdf_file.read())
         
-        extracted_text = extract_text_from_pdf(pdf_path)
-        return JSONResponse(content={
-            "filename": file.filename,
-            "text": extracted_text
-        })
-            
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Extrair texto
+        extracted_text = extract_text_from_pdf(temp_path)
+        return extracted_text
+    except Exception as e:
+        logger.error(f"Erro ao processar arquivo: {str(e)}")
+        return f"Erro ao processar o arquivo: {str(e)}"
     finally:
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+        # Limpar arquivo temporário
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
-@app.post("/download/")
-async def download_pdf(file: UploadFile = File(...)):
-    """
-    Processa o PDF e retorna o txt para download
-    """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="O arquivo enviado não é um PDF."
-        )
+# Interface Gradio
+with gr.Blocks(title="PDF Text Extractor") as demo:
+    gr.Markdown("# PDF Text Extractor")
+    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
-    pdf_path = os.path.join(UPLOAD_DIR, file.filename)
+    with gr.Row():
+        pdf_input = gr.File(label="Arquivo PDF")
     
-    try:
-        with open(pdf_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        extracted_text = extract_text_from_pdf(pdf_path)
-        
-        return PlainTextResponse(
-            content=extracted_text,
-            headers={
-                "Content-Disposition": f"attachment; filename={os.path.splitext(file.filename)[0]}.txt",
-                "Content-Type": "text/plain; charset=utf-8"
-            }
-        )
-            
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+    with gr.Row():
+        extract_btn = gr.Button("Extrair Texto")
+    
+    with gr.Row():
+        text_output = gr.Textbox(label="Texto Extraído", lines=20)
+    
+    extract_btn.click(
+        fn=process_pdf,
+        inputs=[pdf_input],
+        outputs=[text_output]
+    )
 
+# Iniciar o aplicativo
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    # Esta configuração é vital para o funcionamento na Hugging Face Spaces
+    demo.launch(server_name="0.0.0.0", server_port=7860)

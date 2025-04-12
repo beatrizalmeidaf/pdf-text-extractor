@@ -3,3 +3,4 @@ python-multipart==0.0.6
 uvicorn==0.23.2
 tika==2.6.0
 gunicorn==21.2.0
+gradio==3.50.2
