@@ -1,0 +1,5 @@
+fastapi==0.103.1
+python-multipart==0.0.6
+uvicorn==0.23.2
+tika==2.6.0
+gunicorn==21.2.0

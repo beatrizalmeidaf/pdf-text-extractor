@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrator de Texto PDF</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+      
+        <header class="text-center mb-12">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Extrator de Texto PDF</h1>
+            <p class="text-gray-600">Extraia texto de arquivos PDF de forma simples e rápida</p>
+        </header>
+
+        <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">Upload do Arquivo</h2>
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center" id="dropZone">
+                    <input type="file" id="fileInput" accept=".pdf" class="hidden">
+                    <label for="fileInput" class="cursor-pointer">
+                        <div class="mb-4">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                        </div>
+                        <p class="text-gray-600 mb-2">Clique para selecionar ou arraste um arquivo PDF</p>
+                        <p class="text-sm text-gray-500">Apenas arquivos PDF são aceitos</p>
+                    </label>
+                </div>
+                <p id="selectedFile" class="mt-2 text-sm text-gray-500"></p>
+            </div>
+
+            <div class="flex justify-center space-x-4 mb-8">
+                <button id="extractButton" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400" disabled>
+                    Extrair Texto
+                </button>
+                <button id="clearButton" class="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-colors">
+                    Limpar
+                </button>
+            </div>
+
+            <div id="results" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-700">Resultado da Extração</h2>
+                    <button id="downloadButton" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Baixar como TXT
+                    </button>
+                </div>
+                <div id="textResult" class="bg-gray-50 p-4 rounded-lg max-h-[600px] overflow-y-auto font-mono text-sm whitespace-pre-wrap"></div>
+            </div>
+
+            <div id="loading" class="hidden">
+                <div class="flex justify-center items-center p-4">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span class="ml-2 text-gray-600">Processando...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const selectedFile = document.getElementById('selectedFile');
+            const extractButton = document.getElementById('extractButton');
+            const clearButton = document.getElementById('clearButton');
+            const downloadButton = document.getElementById('downloadButton');
+            const results = document.getElementById('results');
+            const textResult = document.getElementById('textResult');
+            const loading = document.getElementById('loading');
+
+            let currentFile = null;
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500');
+                const file = e.dataTransfer.files[0];
+                handleFile(file);
+            });
+
+            fileInput.addEventListener('change', () => {
+                handleFile(fileInput.files[0]);
+            });
+
+            function handleFile(file) {
+                if (file && file.type === 'application/pdf') {
+                    currentFile = file;
+                    selectedFile.textContent = `Arquivo selecionado: ${file.name}`;
+                    extractButton.disabled = false;
+                } else {
+                    currentFile = null;
+                    selectedFile.textContent = 'Por favor, selecione um arquivo PDF válido.';
+                    extractButton.disabled = true;
+                }
+            }
+
+            async function extractText() {
+                if (!currentFile) return;
+
+                const formData = new FormData();
+                formData.append('file', currentFile);
+
+                try {
+                    loading.classList.remove('hidden');
+                    results.classList.add('hidden');
+                    extractButton.disabled = true;
+
+                    const response = await fetch('/upload/', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    textResult.textContent = data.text;
+                    results.classList.remove('hidden');
+                } catch (error) {
+                    alert('Erro ao processar o arquivo: ' + error.message);
+                } finally {
+                    loading.classList.add('hidden');
+                    extractButton.disabled = false;
+                }
+            }
+
+            async function downloadText() {
+                if (!currentFile) return;
+
+                const formData = new FormData();
+                formData.append('file', currentFile);
+
+                try {
+                    const response = await fetch('/download/', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = currentFile.name.replace('.pdf', '.txt');
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                } catch (error) {
+                    alert('Erro ao baixar o arquivo: ' + error.message);
+                }
+            }
+
+            function clearAll() {
+                fileInput.value = '';
+                selectedFile.textContent = '';
+                results.classList.add('hidden');
+                textResult.textContent = '';
+                extractButton.disabled = true;
+                currentFile = null;
+            }
+
+            extractButton.addEventListener('click', extractText);
+            downloadButton.addEventListener('click', downloadText);
+            clearButton.addEventListener('click', clearAll);
+        });
+    </script>
+</body>
+</html>
