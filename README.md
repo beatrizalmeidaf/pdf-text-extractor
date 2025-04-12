@@ -1,7 +1,7 @@
-<h1 align="center">PDF Text Extractor 📝</h1>
+# PDF Text Extractor
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/4795977c-7651-4969-bb32-374fbf3fc7d2" alt="Logo da aplicação" width="300"/>
+  <img src="https://github.com/user-attachments/assets/4795977c-7651-4969-bb32-374fbf3fc7d2" alt="PDF Text Extractor Logo" width="300"/>
 </p>
 
 <p align="center">
@@ -9,7 +9,6 @@
   <img src="https://img.shields.io/badge/FastAPI-0.103.1-green" alt="FastAPI Badge"/>
   <img src="https://img.shields.io/badge/Docker-Ready-blue" alt="Docker Badge"/>
 </p>
-
 
 **PDF Text Extractor** é uma API para extração automatizada de texto de arquivos PDF, com limpeza inteligente de formatações indesejadas (como números de página), preservando a estrutura original do conteúdo.
 
