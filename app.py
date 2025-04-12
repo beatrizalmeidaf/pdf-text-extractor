@@ -8,17 +8,16 @@ import time
 import requests
 from tika import parser
 
-# Configurar logging
+# configurar logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuração Tika
+# configuração Tika
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
 os.environ['TIKA_SERVER_ENDPOINT'] = 'http://127.0.0.1:9998'
 
-# Verificar se o servidor Tika está rodando
-# Verificar se o servidor Tika está rodando
+# verifica se o servidor Tika está rodando
 def check_tika_server():
     try:
         response = requests.get("http://127.0.0.1:9998/tika", timeout=10)
@@ -29,15 +28,15 @@ def check_tika_server():
         logger.error(f"Erro ao verificar servidor Tika: {str(e)}")
     return False
 
-# Tentar conectar ao servidor Tika
-retries = 5  # Aumentado de 3 para 5
+# tenta conectar ao servidor Tika
+retries = 5
 for i in range(retries):
     if check_tika_server():
         break
     logger.warning(f"Tentativa {i+1}/{retries} de conectar ao servidor Tika...")
-    time.sleep(10)  # Aumentado de 5 para 10 segundos
+    time.sleep(10)
 
-# Criar diretórios temporários
+# cria diretórios temporários
 TEMP_DIR = tempfile.mkdtemp()
 logger.info(f"Diretório temporário criado: {TEMP_DIR}")
 
@@ -91,13 +90,12 @@ def clean_page_numbers(text: str) -> str:
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Extrai texto do PDF usando Apache Tika"""
     logger.info(f"Extraindo texto do arquivo: {pdf_path}")
-    
-    # Verificar novamente se o Tika está funcionando
+
     if not check_tika_server():
         return "Erro: Servidor Tika não está disponível. Por favor, tente novamente mais tarde."
     
     try:
-        # Tentar usar Tika com timeout explícito
+        # tentar usar Tika com timeout explícito
         parsed_pdf = parser.from_file(pdf_path, requestOptions={'timeout': 300})
         text_content = parsed_pdf.get('content', '') or ''
         
@@ -124,6 +122,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Erro na extração de texto: {str(e)}")
         return f"Erro ao extrair texto: {str(e)}"
 
+
 def process_pdf(pdf_file):
     """Processa o arquivo PDF enviado e retorna o texto extraído"""
     if pdf_file is None:
@@ -132,16 +131,16 @@ def process_pdf(pdf_file):
     try:
         logger.info(f"Processando arquivo: {pdf_file.name}")
         
-        # Salvar o arquivo temporariamente
+        # salvar o arquivo temporariamente
         temp_path = os.path.join(TEMP_DIR, os.path.basename(pdf_file.name))
         
-        # Gradio disponibiliza o caminho do arquivo em pdf_file.name
+        # gradio disponibiliza o caminho do arquivo em pdf_file.name
         shutil.copy(pdf_file.name, temp_path)
         
-        # Extrair texto
+        # extrair texto
         extracted_text = extract_text_from_pdf(temp_path)
         
-        # Gerar nome do arquivo de saída
+        # gerar nome do arquivo de saída
         output_filename = os.path.splitext(os.path.basename(pdf_file.name))[0] + ".txt"
         
         return extracted_text, output_filename
@@ -155,7 +154,7 @@ def create_txt_file(text, filename):
         return None
     
     try:
-        # Criar arquivo temporário para download
+        # criar arquivo temporário para download
         output_path = os.path.join(TEMP_DIR, filename)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(text)
@@ -165,7 +164,7 @@ def create_txt_file(text, filename):
         logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
         return None
 
-# Interface Gradio
+# interface Gradio
 with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
@@ -183,18 +182,18 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
     
     file_output = gr.File(label="Arquivo para Download", visible=False)
     
-    # Status do servidor Tika
+    # status do servidor Tika
     tika_status = "Conectado" if check_tika_server() else "Desconectado"
     gr.Markdown(f"**Status do servidor Tika:** {tika_status}")
     
-    # Função de extração
+    # função de extração
     extract_btn.click(
         fn=process_pdf,
         inputs=[pdf_input],
         outputs=[text_output, output_filename]
     )
     
-    # Função de download
+    # função de download
     def prepare_download(text, filename):
         if not text or text.startswith("Erro") or not filename:
             return None
@@ -207,7 +206,8 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         outputs=[file_output]
     )
 
-# Iniciar o aplicativo
+# iniciar o aplicativo
 if __name__ == "__main__":
-    # Esta configuração é vital para o funcionamento na Hugging Face Spaces
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    # porta do ambiente Railway 
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)

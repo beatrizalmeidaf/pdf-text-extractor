@@ -2,30 +2,31 @@ FROM python:3.9-slim
 
 WORKDIR /code
 
-# Instalar dependências do sistema e Java para o Apache Tika
+# instalar dependências do sistema e Java para o Apache Tika
 RUN apt-get update && \
     apt-get install -y --no-install-recommends default-jre curl wget procps netcat && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Baixar e instalar o servidor Tika
+# baixar e instalar o servidor Tika
 RUN mkdir -p /opt/tika && \
     wget https://archive.apache.org/dist/tika/2.6.0/tika-server-standard-2.6.0.jar -O /opt/tika/tika-server.jar
 
-# Copiar requirements.txt
+# copiar requirements.txt
 COPY requirements.txt /code/requirements.txt
 
-# Instalar dependências Python
+# instalar dependências Python
 RUN pip install --no-cache-dir -r /code/requirements.txt
 
-# Copiar o resto do código
+# copiar o resto do código
 COPY . /code/
 
-# Expor as portas necessárias
+# expor a porta que o Railway vai usar
+ENV PORT=7860
 EXPOSE 7860
 EXPOSE 9998
 
-# Criar script de inicialização para garantir que o Tika Server esteja em execução
+# criar script de inicialização para garantir que o Tika Server esteja em execução
 RUN echo '#!/bin/bash\n\
 echo "Iniciando servidor Tika..."\n\
 java -jar /opt/tika/tika-server.jar --host=0.0.0.0 --port=9998 > /code/tika.log 2>&1 &\n\
@@ -54,5 +55,5 @@ fi\n\
 echo "Iniciando aplicação Python..."\n\
 python app.py\n' > /code/start.sh && chmod +x /code/start.sh
 
-# Usar o script de inicialização
+# usar o script de inicialização
 CMD ["/code/start.sh"]
