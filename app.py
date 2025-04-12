@@ -11,7 +11,6 @@ from datetime import datetime
 # configuração Tika
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
 os.environ['TIKA_SERVER_ENDPOINT'] = 'http://localhost:9998'
-parser.from_file = lambda file_path, serverEndpoint=None: parser.from_file(file_path, serverEndpoint=serverEndpoint, timeout=300)
 
 # inicializa FastAPI 
 app = FastAPI(
@@ -38,6 +37,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # HTML template
 with open('index.html', 'r', encoding='utf-8') as f:
     HTML_CONTENT = f.read()
+
 
 def is_page_number_line(line: str, max_page_num: int = 1000) -> bool:
     """
@@ -87,26 +87,29 @@ def clean_page_numbers(text: str) -> str:
     return '\n'.join(cleaned_lines)
 
 def extract_text_from_pdf(pdf_path: str) -> str:
-    parsed_pdf = parser.from_file(pdf_path)
-    text_content = parsed_pdf.get('content', '') or parsed_pdf.get('text', '')
-    
-    if not text_content:
-        raise ValueError("Nenhum texto foi extraído do PDF.")
-    
-    # divide o texto em páginas
-    pages = text_content.split('\f')
-    cleaned_pages = []
-    
-    for page in pages:
-        # remove números de página mantendo a formatação
-        cleaned_page = clean_page_numbers(page)
-        if cleaned_page.strip():  
-            cleaned_pages.append(cleaned_page.strip())
-    
-    # junta as páginas com uma quebra de linha dupla entre elas
-    final_text = '\n'.join(cleaned_pages)
-    
-    return final_text
+    try:
+        parsed_pdf = parser.from_file(pdf_path)
+        text_content = parsed_pdf.get('content', '') or parsed_pdf.get('text', '')
+        
+        if not text_content:
+            raise ValueError("Nenhum texto foi extraído do PDF.")
+        
+        # divide o texto em páginas
+        pages = text_content.split('\f')
+        cleaned_pages = []
+        
+        for page in pages:
+            # remove números de página mantendo a formatação
+            cleaned_page = clean_page_numbers(page)
+            if cleaned_page.strip():  
+                cleaned_pages.append(cleaned_page.strip())
+        
+        # junta as páginas com uma quebra de linha dupla entre elas
+        final_text = '\n'.join(cleaned_pages)
+        
+        return final_text
+    except Exception as e:
+        raise ValueError(f"Erro ao extrair texto: {str(e)}")
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -174,3 +177,7 @@ async def download_pdf(file: UploadFile = File(...)):
     finally:
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
