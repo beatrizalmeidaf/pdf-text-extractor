@@ -4,7 +4,7 @@ WORKDIR /code
 
 # Instalar dependências do sistema e Java para o Apache Tika
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends default-jre curl wget procps && \
+    apt-get install -y --no-install-recommends default-jre curl wget procps netcat && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -21,25 +21,38 @@ RUN pip install --no-cache-dir -r /code/requirements.txt
 # Copiar o resto do código
 COPY . /code/
 
-# Expor a porta para a Hugging Face
+# Expor as portas necessárias
 EXPOSE 7860
+EXPOSE 9998
 
 # Criar script de inicialização para garantir que o Tika Server esteja em execução
 RUN echo '#!/bin/bash\n\
 echo "Iniciando servidor Tika..."\n\
-java -jar /opt/tika/tika-server.jar --host=0.0.0.0 --port=9998 > tika.log 2>&1 &\n\
+java -jar /opt/tika/tika-server.jar --host=0.0.0.0 --port=9998 > /code/tika.log 2>&1 &\n\
 TIKA_PID=$!\n\
 echo "Aguardando Tika iniciar (PID: $TIKA_PID)..."\n\
-sleep 10\n\
-if ps -p $TIKA_PID > /dev/null; then\n\
-    echo "Servidor Tika está rodando."\n\
-    echo "Iniciando aplicação Python..."\n\
-    python app.py\n\
-else\n\
-    echo "Falha ao iniciar o servidor Tika. Verifique os logs:"\n\
-    cat tika.log\n\
+\n\
+# Verificar se o Tika está rodando usando netcat\n\
+attempt=0\n\
+max_attempts=30\n\
+while [ $attempt -lt $max_attempts ]; do\n\
+    if netcat -z 127.0.0.1 9998; then\n\
+        echo "Servidor Tika está disponível na porta 9998!"\n\
+        break\n\
+    fi\n\
+    attempt=$((attempt+1))\n\
+    echo "Tentativa $attempt/$max_attempts - Tika ainda não está disponível..."\n\
+    sleep 2\n\
+done\n\
+\n\
+if [ $attempt -eq $max_attempts ]; then\n\
+    echo "Falha ao iniciar o servidor Tika após $max_attempts tentativas. Verifique os logs:"\n\
+    cat /code/tika.log\n\
     exit 1\n\
-fi' > /code/start.sh && chmod +x /code/start.sh
+fi\n\
+\n\
+echo "Iniciando aplicação Python..."\n\
+python app.py\n' > /code/start.sh && chmod +x /code/start.sh
 
 # Usar o script de inicialização
 CMD ["/code/start.sh"]

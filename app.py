@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 
 # Configuração Tika
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
-os.environ['TIKA_SERVER_ENDPOINT'] = 'http://localhost:9998'
+os.environ['TIKA_SERVER_ENDPOINT'] = 'http://127.0.0.1:9998'
 
+# Verificar se o servidor Tika está rodando
 # Verificar se o servidor Tika está rodando
 def check_tika_server():
     try:
-        response = requests.get("http://localhost:9998/tika", timeout=5)
+        response = requests.get("http://127.0.0.1:9998/tika", timeout=10)
         if response.status_code == 200:
             logger.info("Servidor Tika está funcionando!")
             return True
@@ -29,12 +30,12 @@ def check_tika_server():
     return False
 
 # Tentar conectar ao servidor Tika
-retries = 3
+retries = 5  # Aumentado de 3 para 5
 for i in range(retries):
     if check_tika_server():
         break
     logger.warning(f"Tentativa {i+1}/{retries} de conectar ao servidor Tika...")
-    time.sleep(5)
+    time.sleep(10)  # Aumentado de 5 para 10 segundos
 
 # Criar diretórios temporários
 TEMP_DIR = tempfile.mkdtemp()
