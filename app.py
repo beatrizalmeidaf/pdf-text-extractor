@@ -164,9 +164,17 @@ def create_txt_file(text, filename):
         logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
         return None
 
-# interface Gradio
-# interface Gradio
-with gr.Blocks(title="PDF Text Extractor") as demo:
+# função para interface API e gradio
+def process_pdf_interface(pdf_file):
+    text, filename = process_pdf(pdf_file)
+    output_file = None
+    if text and not text.startswith("Erro") and filename:
+        output_file = create_txt_file(text, filename)
+    return text, output_file
+
+# criar ambas as interfaces
+blocks_interface = gr.Blocks(title="PDF Text Extractor")
+with blocks_interface:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
@@ -208,8 +216,27 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         outputs=[file_output]
     )
 
-# iniciar o aplicativo
+# interface simplificada para API
+api_interface = gr.Interface(
+    fn=process_pdf_interface,
+    inputs=gr.File(label="Envie seu PDF"),
+    outputs=[
+        gr.Textbox(label="Texto Extraído", lines=20),
+        gr.File(label="Download .txt")
+    ],
+    title="PDF Text Extractor",
+    description="Interface + API para extrair texto de arquivos PDF usando Apache Tika."
+)
+
+# iniciar o aplicativo com ambas interfaces
 if __name__ == "__main__":
     # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
+    
+    # criar uma aplicação que contém ambas interfaces
+    demo = gr.TabbedInterface(
+        [blocks_interface, api_interface],
+        ["Interface Completa", "Interface API"]
+    )
+    
     demo.launch(server_name="0.0.0.0", server_port=port)
