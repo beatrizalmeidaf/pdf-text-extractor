@@ -165,6 +165,7 @@ def create_txt_file(text, filename):
         return None
 
 # interface Gradio
+# interface Gradio
 with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
@@ -180,7 +181,7 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
     with gr.Row():
         download_btn = gr.Button("Baixar como TXT", variant="secondary")
     
-    file_output = gr.File(label="Arquivo para Download", visible=False)
+    file_output = gr.File(label="Arquivo para Download", visible=True)
     
     # status do servidor Tika
     tika_status = "Conectado" if check_tika_server() else "Desconectado"
@@ -198,7 +199,8 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         if not text or text.startswith("Erro") or not filename:
             return None
         
-        return create_txt_file(text, filename)
+        file_path = create_txt_file(text, filename)
+        return file_path
     
     download_btn.click(
         fn=prepare_download,
