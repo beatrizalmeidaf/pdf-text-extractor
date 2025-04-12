@@ -4,7 +4,7 @@ WORKDIR /code
 
 # instalar dependências do sistema e Java para o Apache Tika
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends default-jre curl wget procps netcat && \
+    apt-get install -y --no-install-recommends default-jre curl wget procps netcat-openbsd && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -37,7 +37,7 @@ echo "Aguardando Tika iniciar (PID: $TIKA_PID)..."\n\
 attempt=0\n\
 max_attempts=30\n\
 while [ $attempt -lt $max_attempts ]; do\n\
-    if netcat -z 127.0.0.1 9998; then\n\
+    if nc -z 127.0.0.1 9998; then\n\
         echo "Servidor Tika está disponível na porta 9998!"\n\
         break\n\
     fi\n\
