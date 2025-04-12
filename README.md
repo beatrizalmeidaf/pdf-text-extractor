@@ -1,8 +1,14 @@
-# PDF Text Extractor 📄
+# <p align="center">PDF Text Extractor 📄</p>
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.103.1-green)
-![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/667a1519-278a-443a-ac96-d70bf5884b80" alt="Logo da aplicação" width="200"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python Badge"/>
+  <img src="https://img.shields.io/badge/FastAPI-0.103.1-green" alt="FastAPI Badge"/>
+  <img src="https://img.shields.io/badge/Docker-Ready-blue" alt="Docker Badge"/>
+</p>
 
 **PDF Text Extractor** é uma API para extração automatizada de texto de arquivos PDF, com limpeza inteligente de formatações indesejadas (como números de página), preservando a estrutura original do conteúdo.
 
@@ -10,19 +16,19 @@
 
 ## Funcionalidades
 
-- Upload de arquivos PDF via interface web
-- Extração de texto com limpeza automática
-- Remoção de números de página e elementos redundantes
-- Visualização do texto diretamente na aplicação
+- Upload de arquivos PDF via interface web  
+- Extração de texto com limpeza automática  
+- Remoção de números de página e elementos redundantes  
+- Visualização do texto diretamente na aplicação  
 - Download do conteúdo extraído em `.txt`
 
 ---
 
 ## Acesso via Interface Web
 
-1. Acesse: [https://pdf-text-extractor-production-ad51.up.railway.app](https://pdf-text-extractor-production-ad51.up.railway.app)
-2. Faça o upload de um arquivo PDF
-3. Clique em **Extrair Texto**
+1. Acesse: [https://pdf-text-extractor-production-ad51.up.railway.app](https://pdf-text-extractor-production-ad51.up.railway.app)  
+2. Faça o upload de um arquivo PDF  
+3. Clique em **Extrair Texto**  
 4. Visualize o conteúdo ou clique em **Baixar como TXT**
 
 ---
@@ -71,7 +77,7 @@ payload = {
     }],
     "event_data": None,
     "fn_index": 2,
-    "session_hash": "t7xa5iimde"  # Veja abaixo como atualizar esse valor, se necessário
+    "session_hash": "t7xa5iimde"
 }
 
 headers = {
@@ -118,11 +124,11 @@ Acesse em: [http://localhost:7860](http://localhost:7860)
 
 ## Tecnologias Utilizadas
 
-- [FastAPI](https://fastapi.tiangolo.com/) – Backend moderno e performático
-- [Gradio](https://www.gradio.app/) – Interface web interativa para APIs e modelos ML
-- [Apache Tika](https://tika.apache.org/) – Extração robusta de texto de PDFs
-- [Uvicorn](https://www.uvicorn.org/) – ASGI server leve e rápido
-- [Gunicorn](https://gunicorn.org/) – Servidor WSGI confiável para produção
-- [python-multipart](https://andrew-d.github.io/python-multipart/) – Suporte a upload de arquivos
-- [Requests](https://docs.python-requests.org/) – Cliente HTTP simples e poderoso
+- [FastAPI](https://fastapi.tiangolo.com/) – Backend moderno e performático  
+- [Gradio](https://www.gradio.app/) – Interface web interativa para APIs e modelos ML  
+- [Apache Tika](https://tika.apache.org/) – Extração robusta de texto de PDFs  
+- [Uvicorn](https://www.uvicorn.org/) – ASGI server leve e rápido  
+- [Gunicorn](https://gunicorn.org/) – Servidor WSGI confiável para produção  
+- [python-multipart](https://andrew-d.github.io/python-multipart/) – Suporte a upload de arquivos  
+- [Requests](https://docs.python-requests.org/) – Cliente HTTP simples e poderoso  
 - [python-dotenv](https://pypi.org/project/python-dotenv/) – Carregamento de variáveis de ambiente via `.env`
