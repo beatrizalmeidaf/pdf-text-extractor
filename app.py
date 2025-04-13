@@ -233,14 +233,7 @@ api_interface = gr.Interface(
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
 
-    # rodar a interface visual
-    def run_blocks():
-        blocks_interface.launch(server_name="0.0.0.0", server_port=port)
+    blocks_interface.launch(server_name="0.0.0.0", server_port=port)
+    
 
-    # rodar a interface da API
-    def run_api():
-        api_interface.launch(server_name="0.0.0.0", server_port=7861, inbrowser=False, share=False)
 
-    # inicia ambas as interfaces em threads separadas
-    threading.Thread(target=run_blocks).start()
-    threading.Thread(target=run_api).start()
