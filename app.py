@@ -225,7 +225,7 @@ api_interface = gr.Interface(
         gr.File(label="Download .txt")
     ],
     title="PDF Text Extractor",
-    description="API para extrair texto de arquivos PDF."
+    description="Interface Secundária"
 )
 
 # iniciar o aplicativo com ambas interfaces
@@ -235,8 +235,8 @@ if __name__ == "__main__":
     
     # criar uma aplicação que contém ambas interfaces
     demo = gr.TabbedInterface(
-        [api_interface],
-        ["Interface API"]
+        [blocks_interface, api_interface],
+        ["Interface Completa", "Interface API"]
     )
     
     demo.launch(server_name="0.0.0.0", server_port=port)
