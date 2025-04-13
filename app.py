@@ -122,8 +122,24 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Erro na extração de texto: {str(e)}")
         return f"Erro ao extrair texto: {str(e)}"
 
+def create_txt_file(text, filename):
+    """Cria um arquivo de texto para download"""
+    if not text or text.startswith("Erro") or not filename:
+        return None
+    
+    try:
+        # criar arquivo temporário para download
+        output_path = os.path.join(TEMP_DIR, filename)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        
+        return output_path
+    except Exception as e:
+        logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
+        return None
+
 def process_pdf(pdf_file):
-    """Processa o arquivo PDF enviado e retorna o texto extraído"""
+    """Processa o arquivo PDF enviado e retorna o texto extraído e caminho do arquivo para UI"""
     if pdf_file is None:
         return "Nenhum arquivo enviado.", None
     
@@ -143,9 +159,7 @@ def process_pdf(pdf_file):
         output_filename = os.path.splitext(os.path.basename(pdf_file.name))[0] + ".txt"
         
         # criar arquivo para download
-        output_path = os.path.join(TEMP_DIR, output_filename)
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(extracted_text)
+        output_path = create_txt_file(extracted_text, output_filename)
         
         return extracted_text, output_path
     except Exception as e:
@@ -153,9 +167,16 @@ def process_pdf(pdf_file):
         return f"Erro ao processar o arquivo: {str(e)}", None
 
 def api_predict(pdf_file):
-    return process_pdf(pdf_file)
+    """Função específica para API que retorna dados em formato compatível com API"""
+    text, file_path = process_pdf(pdf_file)
 
-with gr.Blocks(title="PDF Text Extractor") as demo:
+    if file_path is None:
+        return text, None
+    
+    return text, file_path
+
+demo = gr.Blocks(title="PDF Text Extractor")
+with demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
@@ -182,8 +203,11 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         outputs=[text_output, file_output]
     )
 
-
+# configuração para permitir chamadas de API
 demo = demo.queue()
+
+demo.api_name = "predict"  # nome do endpoint da API
+demo.api_function = api_predict  
 
 # iniciar o aplicativo
 if __name__ == "__main__":
