@@ -166,17 +166,8 @@ def process_pdf(pdf_file):
         logger.error(f"Erro ao processar arquivo: {str(e)}")
         return f"Erro ao processar o arquivo: {str(e)}", None
 
-def api_predict(pdf_file):
-    """Função específica para API que retorna dados em formato compatível com API"""
-    text, file_path = process_pdf(pdf_file)
 
-    if file_path is None:
-        return text, None
-    
-    return text, file_path
-
-demo = gr.Blocks(title="PDF Text Extractor")
-with demo:
+with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
@@ -196,18 +187,29 @@ with demo:
     tika_status = "Conectado" if check_tika_server() else "Desconectado"
     gr.Markdown(f"**Status do servidor Tika:** {tika_status}")
     
-    # função para processar o PDF via interface
+    # função para processar o PDF via interface web
     extract_btn.click(
         fn=process_pdf,
         inputs=[pdf_input],
         outputs=[text_output, file_output]
     )
 
-# configuração para permitir chamadas de API
-demo = demo.queue()
 
-demo.api_name = "predict"  # nome do endpoint da API
-demo.api_function = api_predict  
+api = gr.Interface(
+    fn=process_pdf,  # usando a mesma função
+    inputs=gr.File(label="PDF"),
+    outputs=[
+        gr.Textbox(label="Texto extraído"),
+        gr.File(label="Arquivo txt")
+    ],
+    title="API PDF Text Extractor",
+    description="API para extração de texto de arquivos PDF usando Apache Tika",
+    allow_flagging="never"
+)
+
+# permitir chamadas de API
+demo = gr.mount_gradio_app(demo, api, path="/api")  # monta a API em /api
+demo = demo.queue()
 
 # iniciar o aplicativo
 if __name__ == "__main__":
