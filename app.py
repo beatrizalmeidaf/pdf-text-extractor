@@ -147,17 +147,26 @@ def process_pdf(pdf_file):
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(extracted_text)
         
+        logger.info(f"Processamento concluído: {output_path}")
         return extracted_text, output_path
     except Exception as e:
         logger.error(f"Erro ao processar arquivo: {str(e)}")
         return f"Erro ao processar o arquivo: {str(e)}", None
 
-# define função para API 
 def api_predict(pdf_file):
-    return process_pdf(pdf_file)
+    """Função específica para API, garante compatibilidade com formatação anterior"""
+    try:
+        logger.info(f"API - Processando arquivo: {pdf_file}")
+        result = process_pdf(pdf_file)
+        return result
+    except Exception as e:
+        logger.error(f"API - Erro ao processar: {str(e)}")
+        return f"Erro: {str(e)}", None
 
-# criar interface Gradio
-with gr.Blocks(title="PDF Text Extractor") as demo:
+
+demo = gr.Blocks(title="PDF Text Extractor")
+
+with demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
@@ -184,13 +193,23 @@ with gr.Blocks(title="PDF Text Extractor") as demo:
         outputs=[text_output, file_output]
     )
 
-# configurar a interface para responder à API
-demo = demo.queue()
 
-# iniciar o aplicativo
+demo = demo.queue()
+app = gr.mount_gradio_app(demo, "/")
+
+api = gr.Interface(
+    fn=api_predict,
+    inputs=gr.File(),
+    outputs=[gr.Textbox(), gr.File()],
+    examples=[],
+    analytics_enabled=False,
+)
+api = api.queue()
+
+
 if __name__ == "__main__":
     # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
     
-    # iniciar a aplicação com API
-    demo.launch(server_name="0.0.0.0", server_port=port)
+    combined_app = gr.TabbedInterface([demo, api], ["Interface", "API"])
+    combined_app.launch(server_name="0.0.0.0", server_port=port)
