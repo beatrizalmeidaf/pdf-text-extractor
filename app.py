@@ -5,7 +5,6 @@ import re
 import tempfile
 import logging
 import time
-import threading
 import requests
 from tika import parser
 
@@ -226,14 +225,18 @@ api_interface = gr.Interface(
         gr.File(label="Download .txt")
     ],
     title="PDF Text Extractor",
-    description="Interface + API para extrair texto de arquivos PDF usando Apache Tika."
+    description="API para extrair texto de arquivos PDF."
 )
 
 # iniciar o aplicativo com ambas interfaces
 if __name__ == "__main__":
+    # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
-
-    blocks_interface.launch(server_name="0.0.0.0", server_port=port)
     
-
-
+    # criar uma aplicação que contém ambas interfaces
+    demo = gr.TabbedInterface(
+        [api_interface],
+        ["Interface API"]
+    )
+    
+    demo.launch(server_name="0.0.0.0", server_port=port)
