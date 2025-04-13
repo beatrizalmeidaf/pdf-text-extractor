@@ -41,10 +41,6 @@ for i in range(retries):
     time.sleep(10)
 
 def is_page_number_line(line: str, max_page_num: int = 1000) -> bool:
-    """
-    Determina se uma linha contém apenas um número de página.
-    Considera números alinhados à direita como números de página.
-    """
     # remove espaços no início e fim
     stripped_line = line.strip()
     
@@ -122,24 +118,8 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Erro na extração de texto: {str(e)}")
         return f"Erro ao extrair texto: {str(e)}"
 
-def create_txt_file(text, filename):
-    """Cria um arquivo de texto para download"""
-    if not text or text.startswith("Erro") or not filename:
-        return None
-    
-    try:
-        # criar arquivo temporário para download
-        output_path = os.path.join(TEMP_DIR, filename)
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        
-        return output_path
-    except Exception as e:
-        logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
-        return None
-
 def process_pdf(pdf_file):
-    """Processa o arquivo PDF enviado e retorna o texto extraído e caminho do arquivo para UI"""
+    """Processa o arquivo PDF enviado e retorna o texto extraído"""
     if pdf_file is None:
         return "Nenhum arquivo enviado.", None
     
@@ -159,56 +139,31 @@ def process_pdf(pdf_file):
         output_filename = os.path.splitext(os.path.basename(pdf_file.name))[0] + ".txt"
         
         # criar arquivo para download
-        output_path = create_txt_file(extracted_text, output_filename)
+        output_path = os.path.join(TEMP_DIR, output_filename)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(extracted_text)
         
         return extracted_text, output_path
     except Exception as e:
         logger.error(f"Erro ao processar arquivo: {str(e)}")
         return f"Erro ao processar o arquivo: {str(e)}", None
 
-
-with gr.Blocks(title="PDF Text Extractor") as demo:
-    gr.Markdown("# PDF Text Extractor")
-    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
-    
-    with gr.Row():
-        pdf_input = gr.File(label="Arquivo PDF")
-    
-    with gr.Row():
-        extract_btn = gr.Button("Extrair Texto", variant="primary")
-    
-    with gr.Row():
-        text_output = gr.Textbox(label="Texto Extraído", lines=20)
-    
-    with gr.Row():
-        file_output = gr.File(label="Download do texto extraído (.txt)")
-    
-    # status do servidor Tika
-    tika_status = "Conectado" if check_tika_server() else "Desconectado"
-    gr.Markdown(f"**Status do servidor Tika:** {tika_status}")
-    
-    # função para processar o PDF via interface web
-    extract_btn.click(
-        fn=process_pdf,
-        inputs=[pdf_input],
-        outputs=[text_output, file_output]
-    )
-
-
-api = gr.Interface(
-    fn=process_pdf,  # usando a mesma função
-    inputs=gr.File(label="PDF"),
+demo = gr.Interface(
+    fn=process_pdf,
+    inputs=gr.File(label="Arquivo PDF"),
     outputs=[
-        gr.Textbox(label="Texto extraído"),
-        gr.File(label="Arquivo txt")
+        gr.Textbox(label="Texto Extraído", lines=20),
+        gr.File(label="Download do texto extraído (.txt)")
     ],
-    title="API PDF Text Extractor",
-    description="API para extração de texto de arquivos PDF usando Apache Tika",
-    allow_flagging="never"
+    title="PDF Text Extractor",
+    description="Extraia texto de arquivos PDF usando Apache Tika",
+    article=f"""
+    <div style='margin-top: 20px'>
+        <b>Status do servidor Tika:</b> {"Conectado" if check_tika_server() else "Desconectado"}
+    </div>
+    """
 )
 
-# permitir chamadas de API
-demo = gr.mount_gradio_app(demo, api, path="/api")  # monta a API em /api
 demo = demo.queue()
 
 # iniciar o aplicativo
