@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
 os.environ['TIKA_SERVER_ENDPOINT'] = 'http://127.0.0.1:9998'
 
+# cria diretórios temporários
+TEMP_DIR = tempfile.mkdtemp()
+logger.info(f"Diretório temporário criado: {TEMP_DIR}")
+
 # verifica se o servidor Tika está rodando
 def check_tika_server():
     try:
@@ -35,10 +39,6 @@ for i in range(retries):
         break
     logger.warning(f"Tentativa {i+1}/{retries} de conectar ao servidor Tika...")
     time.sleep(10)
-
-# cria diretórios temporários
-TEMP_DIR = tempfile.mkdtemp()
-logger.info(f"Diretório temporário criado: {TEMP_DIR}")
 
 def is_page_number_line(line: str, max_page_num: int = 1000) -> bool:
     """
@@ -122,7 +122,6 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         logger.error(f"Erro na extração de texto: {str(e)}")
         return f"Erro ao extrair texto: {str(e)}"
 
-
 def process_pdf(pdf_file):
     """Processa o arquivo PDF enviado e retorna o texto extraído"""
     if pdf_file is None:
@@ -143,100 +142,53 @@ def process_pdf(pdf_file):
         # gerar nome do arquivo de saída
         output_filename = os.path.splitext(os.path.basename(pdf_file.name))[0] + ".txt"
         
-        return extracted_text, output_filename
+        # criar arquivo para download
+        output_path = os.path.join(TEMP_DIR, output_filename)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(extracted_text)
+        
+        return extracted_text, output_path
     except Exception as e:
         logger.error(f"Erro ao processar arquivo: {str(e)}")
         return f"Erro ao processar o arquivo: {str(e)}", None
 
-def create_txt_file(text, filename):
-    """Cria um arquivo de texto para download"""
-    if not text or not filename:
-        return None
-    
-    try:
-        # criar arquivo temporário para download
-        output_path = os.path.join(TEMP_DIR, filename)
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        
-        return output_path
-    except Exception as e:
-        logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
-        return None
-
-# função para interface API e gradio
-def process_pdf_interface(pdf_file):
-    text, filename = process_pdf(pdf_file)
-    output_file = None
-    if text and not text.startswith("Erro") and filename:
-        output_file = create_txt_file(text, filename)
-    return text, output_file
-
-# criar ambas as interfaces
-blocks_interface = gr.Blocks(title="PDF Text Extractor")
-with blocks_interface:
+with gr.Blocks(title="PDF Text Extractor") as demo:
     gr.Markdown("# PDF Text Extractor")
     gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
     
-    pdf_input = gr.File(label="Arquivo PDF")
-    output_filename = gr.State(value=None)
+    with gr.Row():
+        pdf_input = gr.File(label="Arquivo PDF")
     
     with gr.Row():
         extract_btn = gr.Button("Extrair Texto", variant="primary")
     
-    text_output = gr.Textbox(label="Texto Extraído", lines=20)
+    with gr.Row():
+        text_output = gr.Textbox(label="Texto Extraído", lines=20)
     
     with gr.Row():
-        download_btn = gr.Button("Baixar como TXT", variant="secondary")
-    
-    file_output = gr.File(label="Arquivo para Download", visible=True)
+        file_output = gr.File(label="Download do texto extraído (.txt)")
     
     # status do servidor Tika
     tika_status = "Conectado" if check_tika_server() else "Desconectado"
     gr.Markdown(f"**Status do servidor Tika:** {tika_status}")
     
-    # função de extração
+    # função para processar o PDF
     extract_btn.click(
         fn=process_pdf,
         inputs=[pdf_input],
-        outputs=[text_output, output_filename]
+        outputs=[text_output, file_output]
     )
     
-    # função de download
-    def prepare_download(text, filename):
-        if not text or text.startswith("Erro") or not filename:
-            return None
-        
-        file_path = create_txt_file(text, filename)
-        return file_path
     
-    download_btn.click(
-        fn=prepare_download,
-        inputs=[text_output, output_filename],
-        outputs=[file_output]
-    )
+    def api_predict(pdf_file):
+        return process_pdf(pdf_file)
+    
+    # registrando a função que será exposta via API
+    demo.queue(api_name="predict").launch
 
-# interface simplificada para API
-api_interface = gr.Interface(
-    fn=process_pdf_interface,
-    inputs=gr.File(label="Envie seu PDF"),
-    outputs=[
-        gr.Textbox(label="Texto Extraído", lines=20),
-        gr.File(label="Download .txt")
-    ],
-    title="PDF Text Extractor",
-    description="Interface + API para extrair texto de arquivos PDF usando Apache Tika."
-)
-
-# iniciar o aplicativo com ambas interfaces
+# iniciar o aplicativo
 if __name__ == "__main__":
     # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
     
-    # criar uma aplicação que contém ambas interfaces
-    demo = gr.TabbedInterface(
-        [blocks_interface, api_interface],
-        ["Interface Completa", "Interface API"]
-    )
-    
-    demo.launch(server_name="0.0.0.0", server_port=port)
+    demo.queue(api_name="predict").launch(server_name="0.0.0.0", server_port=port)
