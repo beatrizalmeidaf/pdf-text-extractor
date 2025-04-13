@@ -233,10 +233,13 @@ if __name__ == "__main__":
     # porta do ambiente Railway 
     port = int(os.environ.get("PORT", 7860))
     
-    # criar uma aplicação que contém ambas interfaces
+    blocks_interface.queue() 
+
     blocks_interface.launch(
         server_name="0.0.0.0", 
         server_port=port,
-        api_name="pdf_extractor",
-        api_fn=process_pdf_interface
+        share=False, 
+        inbrowser=False,  
+        show_api=True, 
+        show_error=True  
     )
