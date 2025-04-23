@@ -164,7 +164,65 @@ def create_txt_file(text, filename):
         logger.error(f"Erro ao criar arquivo TXT: {str(e)}")
         return None
 
-# função para interface API e gradio
+# gera código de exemplo para uso da API
+def generate_api_example_code(pdf_filename):
+    if not pdf_filename:
+        return "Nenhum arquivo enviado. Carregue um PDF para gerar o exemplo de código."
+    
+    code_example = f"""import requests
+import os
+
+# Caminho do seu PDF
+PDF_PATH = "{pdf_filename}"
+
+# Etapa 1: Enviar o PDF para o servidor
+upload_url = "https://pdf-text-extractor-production-ad51.up.railway.app/upload"
+with open(PDF_PATH, 'rb') as f:
+    files = {{'files': (os.path.basename(PDF_PATH), f, 'application/pdf')}}
+    upload_response = requests.post(upload_url, files=files)
+
+if upload_response.status_code != 200:
+    print("Erro no upload:", upload_response.text)
+    exit()
+
+file_path = upload_response.json()[0]
+file_url = f"https://pdf-text-extractor-production-ad51.up.railway.app/file={{file_path}}"
+
+# Etapa 2: Solicitar extração do texto
+predict_url = "https://pdf-text-extractor-production-ad51.up.railway.app/run/predict"
+payload = {{
+    "data": [{{
+        "data": file_url,
+        "name": file_path,
+        "size": os.path.getsize(PDF_PATH),
+        "orig_name": os.path.basename(PDF_PATH),
+        "is_file": True
+    }}],
+    "event_data": None,
+    "fn_index": 2,
+    "session_hash": "t7xa5iimde"
+}}
+
+headers = {{
+    "Content-Type": "application/json",
+    "Referer": "https://pdf-text-extractor-production-ad51.up.railway.app/",
+    "Origin": "https://pdf-text-extractor-production-ad51.up.railway.app",
+    "User-Agent": "Mozilla/5.0"
+}}
+
+response = requests.post(predict_url, headers=headers, json=payload)
+
+if response.status_code == 200:
+    extracted_text = response.json()["data"][0]
+    with open("texto_extraido.txt", "w", encoding="utf-8") as txt_file:
+        txt_file.write(extracted_text)
+    print("Texto extraído salvo em 'texto_extraido.txt'")
+else:
+    print("Erro na predição:", response.status_code, response.text)
+"""
+    return code_example
+
+# função para interface principal
 def process_pdf_interface(pdf_file):
     text, filename = process_pdf(pdf_file)
     output_file = None
@@ -172,7 +230,21 @@ def process_pdf_interface(pdf_file):
         output_file = create_txt_file(text, filename)
     return text, output_file
 
-# criar ambas as interfaces
+# função para interface secundária (API)
+def process_pdf_api_interface(pdf_file):
+    text, filename = process_pdf(pdf_file)
+    output_file = None
+    api_code = "Carregue um PDF para gerar o código de exemplo"
+    
+    if text and not text.startswith("Erro") and filename:
+        output_file = create_txt_file(text, filename)
+        # Gerar o código de exemplo com o nome do arquivo real
+        pdf_filename = os.path.basename(pdf_file.name)
+        api_code = generate_api_example_code(pdf_filename)
+        
+    return text, output_file, api_code
+
+# criar interface principal
 blocks_interface = gr.Blocks(title="PDF Text Extractor")
 with blocks_interface:
     gr.Markdown("# PDF Text Extractor")
@@ -216,16 +288,33 @@ with blocks_interface:
         outputs=[file_output]
     )
 
-# interface simplificada para API
-api_interface = gr.Interface(
-    fn=process_pdf_interface,
-    inputs=gr.File(label="Envie seu PDF"),
-    outputs=[
-        gr.Textbox(label="Texto Extraído", lines=20),
-        gr.File(label="Download .txt")
-    ],
-    title="PDF Text Extractor"
-)
+# interface API com geração de código
+api_interface = gr.Blocks(title="API PDF Text Extractor")
+with api_interface:
+    gr.Markdown("# API PDF Text Extractor")
+    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto e ver como usar a API.")
+    
+    # upload e extração
+    pdf_input_api = gr.File(label="Arquivo PDF")
+    
+    with gr.Row():
+        extract_btn_api = gr.Button("Extrair Texto e Gerar Código", variant="primary")
+    
+    # saídas
+    text_output_api = gr.Textbox(label="Texto Extraído", lines=10)
+    file_output_api = gr.File(label="Arquivo para Download")
+    
+    # código de exemplo
+    gr.Markdown("## Como usar a API com seu PDF")
+    gr.Markdown("Copie o código abaixo para usar a API via Python:")
+    api_code_output = gr.Code(language="python", label="Código de Exemplo", lines=30)
+    
+    # função para extrair texto e gerar código de API
+    extract_btn_api.click(
+        fn=process_pdf_api_interface,
+        inputs=[pdf_input_api],
+        outputs=[text_output_api, file_output_api, api_code_output]
+    )
 
 # iniciar o aplicativo com ambas interfaces
 if __name__ == "__main__":
@@ -235,7 +324,7 @@ if __name__ == "__main__":
     # criar uma aplicação que contém ambas interfaces
     demo = gr.TabbedInterface(
         [blocks_interface, api_interface],
-        ["Interface Completa", "Interface Secundária"]
+        ["Interface Principal", "Interface API"]
     )
     
     demo.launch(server_name="0.0.0.0", server_port=port)
