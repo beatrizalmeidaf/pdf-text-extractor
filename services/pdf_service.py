@@ -11,20 +11,28 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     """
     Extrai e processa texto de um arquivo PDF.
     """
-    logger.info(f"Extraindo texto do arquivo: {pdf_path}")
+    file_size_mb = os.path.getsize(pdf_path) / 1024 / 1024
+    logger.info(f"Extraindo texto do arquivo: {pdf_path} (Tamanho: {file_size_mb:.2f}MB)")
     
-    # extrai o texto bruto usando Tika
+    # extrai o texto usando Tika
     raw_text = extract_text_with_tika(pdf_path)
     
-    # se ocorreu um erro, retorna a mensagem de erro
+    # se ocorreu um erro retorna a mensagem de erro
     if raw_text.startswith("Erro"):
         return raw_text
         
+    # verifica se conseguiu extrair algum texto
+    if not raw_text or len(raw_text.strip()) < 10: 
+        logger.warning(f"Texto extraído muito curto ou vazio: '{raw_text}'")
+        return "Não foi possível extrair texto deste PDF. O texto extraído está vazio ou é muito curto."
+    
+    logger.info(f"Texto extraído com sucesso. Tamanho: {len(raw_text)} caracteres")
+    
     # processa o texto extraído
     processed_text = process_extracted_text(raw_text)
     
     if not processed_text:
-        return "Não foi possível extrair texto deste PDF."
+        return "Não foi possível processar o texto extraído deste PDF."
         
     logger.info("Texto extraído e processado com sucesso")
     return processed_text

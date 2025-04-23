@@ -45,8 +45,9 @@ def extract_text_with_tika(file_path):
             logger.warning(f"Arquivo muito grande: {file_size} bytes")
             return "Erro: O arquivo é muito grande para ser processado (limite de 100MB). Por favor, utilize um arquivo menor."
         
-        # incrementar timeout para arquivos maiores
-        timeout = max(300, int(file_size / 1024 / 1024 * 10))  # 10 segundos por MB com mínimo de 300s
+        timeout = max(600, int(file_size / 1024 / 1024 * 20))
+        
+        logger.info(f"Processando arquivo de {file_size/1024/1024:.2f}MB com timeout de {timeout}s")
         
         # tentar usar Tika com timeout calculado com base no tamanho do arquivo
         parsed_file = parser.from_file(file_path, requestOptions={'timeout': timeout})
