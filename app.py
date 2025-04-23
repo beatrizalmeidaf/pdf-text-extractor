@@ -282,7 +282,7 @@ with blocks_interface:
     download_btn.click(
         fn=prepare_download_file,
         inputs=[text_content, output_filename],
-        outputs=gr.File(label="Download", visible=False, interactive=False, elem_id="download_file"),
+        outputs=gr.File(label="Download", elem_id="download_file"),
         _js="""
         async function downloadFile(fileData) {
             if (!fileData) return null;
