@@ -1,8 +1,8 @@
 #!/bin/bash
 
 echo "Iniciando servidor Tika com memória aumentada..."
-# memória máxima para 4GB
-java -Xmx4g -jar /opt/tika/tika-server.jar --host=0.0.0.0 --port=9998 > /code/tika.log 2>&1 &
+# memória máxima para 8GB
+java -Xmx8g -jar /opt/tika/tika-server.jar --host=0.0.0.0 --port=9998 > /code/tika.log 2>&1 &
 TIKA_PID=$!
 echo "Aguardando Tika iniciar (PID: $TIKA_PID)..."
 
