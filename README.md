@@ -5,9 +5,15 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python Badge"/>
-  <img src="https://img.shields.io/badge/FastAPI-0.103.1-green" alt="FastAPI Badge"/>
-  <img src="https://img.shields.io/badge/Docker-Ready-blue" alt="Docker Badge"/>
+  <a href="https://www.python.org/doc/">
+    <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python Badge"/>
+  </a>
+  <a href="https://fastapi.tiangolo.com/">
+    <img src="https://img.shields.io/badge/FastAPI-0.103.1-green" alt="FastAPI Badge"/>
+  </a>
+  <a href="https://docs.docker.com/">
+    <img src="https://img.shields.io/badge/Docker-Ready-blue" alt="Docker Badge"/>
+  </a>
 </p>
 
 **PDF Text Extractor** é uma API para extração automatizada de texto de arquivos PDF, com limpeza inteligente de formatações indesejadas (como números de página), preservando a estrutura original do conteúdo.
