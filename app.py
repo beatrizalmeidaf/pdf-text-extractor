@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 os.environ['TIKA_CLIENT_ONLY'] = 'True'
 os.environ['TIKA_SERVER_ENDPOINT'] = 'http://127.0.0.1:9998'
 
+# Configuração de tamanho máximo para os arquivos (100MB)
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB em bytes
+
 # verifica se o servidor Tika está rodando
 def check_tika_server():
     try:
@@ -95,8 +98,17 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         return "Erro: Servidor Tika não está disponível. Por favor, tente novamente mais tarde."
     
     try:
-        # tentar usar Tika com timeout explícito
-        parsed_pdf = parser.from_file(pdf_path, requestOptions={'timeout': 300})
+        # verificar o tamanho do arquivo
+        file_size = os.path.getsize(pdf_path)
+        if file_size > MAX_FILE_SIZE:
+            logger.warning(f"Arquivo muito grande: {file_size} bytes")
+            return "Erro: O arquivo é muito grande para ser processado (limite de 100MB). Por favor, utilize um arquivo menor."
+        
+        # incrementar timeout para arquivos maiores
+        timeout = max(300, int(file_size / 1024 / 1024 * 10))  # 10 segundos por MB com mínimo de 300s
+        
+        # tentar usar Tika com timeout calculado com base no tamanho do arquivo
+        parsed_pdf = parser.from_file(pdf_path, requestOptions={'timeout': timeout})
         text_content = parsed_pdf.get('content', '') or ''
         
         if not text_content:
@@ -222,36 +234,15 @@ else:
 """
     return code_example
 
-# função para interface principal
-def process_pdf_interface(pdf_file):
-    text, filename = process_pdf(pdf_file)
-    output_file = None
-    if text and not text.startswith("Erro") and filename:
-        output_file = create_txt_file(text, filename)
-    return text, output_file
-
-# função para interface secundária (API)
-def process_pdf_api_interface(pdf_file):
-    text, filename = process_pdf(pdf_file)
-    output_file = None
-    api_code = "Carregue um PDF para gerar o código de exemplo"
-    
-    if text and not text.startswith("Erro") and filename:
-        output_file = create_txt_file(text, filename)
-        # Gerar o código de exemplo com o nome do arquivo real
-        pdf_filename = os.path.basename(pdf_file.name)
-        api_code = generate_api_example_code(pdf_filename)
-        
-    return text, output_file, api_code
-
 # criar interface principal
 blocks_interface = gr.Blocks(title="PDF Text Extractor")
 with blocks_interface:
     gr.Markdown("# PDF Text Extractor")
-    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto.")
+    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto. Limite máximo: 100MB.")
     
     pdf_input = gr.File(label="Arquivo PDF")
     output_filename = gr.State(value=None)
+    text_content = gr.State(value=None)
     
     with gr.Row():
         extract_btn = gr.Button("Extrair Texto", variant="primary")
@@ -261,21 +252,27 @@ with blocks_interface:
     with gr.Row():
         download_btn = gr.Button("Baixar como TXT", variant="secondary")
     
-    file_output = gr.File(label="Arquivo para Download", visible=True)
-    
     # status do servidor Tika
     tika_status = "Conectado" if check_tika_server() else "Desconectado"
     gr.Markdown(f"**Status do servidor Tika:** {tika_status}")
     
     # função de extração
+    def extract_and_save(pdf_file):
+        text, filename = process_pdf(pdf_file)
+        if text and not text.startswith("Erro") and filename:
+            # Salvar o conteúdo internamente para download posterior
+            file_path = create_txt_file(text, filename)
+            return text, filename, text
+        return text, None, None
+    
     extract_btn.click(
-        fn=process_pdf,
+        fn=extract_and_save,
         inputs=[pdf_input],
-        outputs=[text_output, output_filename]
+        outputs=[text_output, output_filename, text_content]
     )
     
-    # função de download
-    def prepare_download(text, filename):
+    # função de download direto
+    def prepare_download_file(text, filename):
         if not text or text.startswith("Erro") or not filename:
             return None
         
@@ -283,37 +280,61 @@ with blocks_interface:
         return file_path
     
     download_btn.click(
-        fn=prepare_download,
-        inputs=[text_output, output_filename],
-        outputs=[file_output]
+        fn=prepare_download_file,
+        inputs=[text_content, output_filename],
+        outputs=gr.File(label="Download", visible=False, interactive=False, elem_id="download_file"),
+        _js="""
+        async function downloadFile(fileData) {
+            if (!fileData) return null;
+            
+            const response = await fetch(fileData);
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = fileData.split('/').pop();
+            document.body.appendChild(a);
+            a.click();
+            
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            return null;
+        }
+        """
     )
 
-# interface API com geração de código
+# interface API com geração de código (simplificada)
 api_interface = gr.Blocks(title="API PDF Text Extractor")
 with api_interface:
     gr.Markdown("# API PDF Text Extractor")
-    gr.Markdown("Faça upload de um arquivo PDF para extrair o texto e ver como usar a API.")
+    gr.Markdown("Faça upload de um arquivo PDF para gerar o código de exemplo para uso da API.")
     
-    # upload e extração
+    # upload e geração de código
     pdf_input_api = gr.File(label="Arquivo PDF")
     
     with gr.Row():
-        extract_btn_api = gr.Button("Extrair Texto e Gerar Código", variant="primary")
-    
-    # saídas
-    text_output_api = gr.Textbox(label="Texto Extraído", lines=10)
-    file_output_api = gr.File(label="Arquivo para Download")
+        generate_btn_api = gr.Button("Gerar Código de Exemplo", variant="primary")
     
     # código de exemplo
     gr.Markdown("## Como usar a API com seu PDF")
     gr.Markdown("Copie o código abaixo para usar a API via Python:")
     api_code_output = gr.Code(language="python", label="Código de Exemplo", lines=30)
     
-    # função para extrair texto e gerar código de API
-    extract_btn_api.click(
-        fn=process_pdf_api_interface,
+    # função para gerar apenas o código de API
+    def generate_api_code(pdf_file):
+        if pdf_file is None:
+            return "Nenhum arquivo enviado. Carregue um PDF para gerar o exemplo de código."
+        
+        pdf_filename = os.path.basename(pdf_file.name)
+        return generate_api_example_code(pdf_filename)
+    
+    generate_btn_api.click(
+        fn=generate_api_code,
         inputs=[pdf_input_api],
-        outputs=[text_output_api, file_output_api, api_code_output]
+        outputs=[api_code_output]
     )
 
 # iniciar o aplicativo com ambas interfaces
