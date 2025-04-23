@@ -278,32 +278,11 @@ with blocks_interface:
         
         file_path = create_txt_file(text, filename)
         return file_path
-    
+
     download_btn.click(
         fn=prepare_download_file,
         inputs=[text_content, output_filename],
-        outputs=gr.File(label="Download", elem_id="download_file"),
-        _js="""
-        async function downloadFile(fileData) {
-            if (!fileData) return null;
-            
-            const response = await fetch(fileData);
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = fileData.split('/').pop();
-            document.body.appendChild(a);
-            a.click();
-            
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            return null;
-        }
-        """
+        outputs=gr.File(label="Clique para baixar")
     )
 
 # interface API com geração de código (simplificada)
