@@ -1,6 +1,6 @@
 import os
 import logging
-from config.settings import BASE_URL
+from config.settings import API_BASE_URL
 from services.tika_service import extract_text_with_tika
 from utils.text_utils import process_extracted_text
 from utils.file_utils import save_temp_file, create_text_file
@@ -64,9 +64,7 @@ def process_pdf_file(pdf_file):
         return f"Erro ao processar o arquivo: {str(e)}", None
 
 def generate_api_example_code(pdf_filename):
-    """
-    Gera código de exemplo para uso da API com o arquivo PDF especificado.
-    """
+    """Gera código de exemplo para uso da API"""
     if not pdf_filename:
         return "Nenhum arquivo enviado. Carregue um PDF para gerar o exemplo de código."
     
@@ -77,7 +75,7 @@ import os
 PDF_PATH = "{pdf_filename}"
 
 # Etapa 1: Enviar o PDF para o servidor
-upload_url = "{BASE_URL}/upload"
+upload_url = "{API_BASE_URL}/upload"
 with open(PDF_PATH, 'rb') as f:
     files = {{'files': (os.path.basename(PDF_PATH), f, 'application/pdf')}}
     upload_response = requests.post(upload_url, files=files)
@@ -87,38 +85,27 @@ if upload_response.status_code != 200:
     exit()
 
 file_path = upload_response.json()[0]
-file_url = f"{BASE_URL}/file={{file_path}}"
+print(f"Arquivo enviado com sucesso.\\nPath recebido: {{file_path}}")
 
-# Etapa 2: Solicitar extração do texto
-predict_url = "{BASE_URL}/run/predict"
-payload = {{
-    "data": [{{
-        "data": file_url,
-        "name": file_path,
-        "size": os.path.getsize(PDF_PATH),
-        "orig_name": os.path.basename(PDF_PATH),
-        "is_file": True
-    }}],
-    "event_data": None,
-    "fn_index": 0,
-    "session_hash": "t7xa5iimde"
-}}
+# Etapa 2: Solicitar extração do texto usando o endpoint direto
+extract_url = "{API_BASE_URL}/api/extract_text"
+with open(PDF_PATH, 'rb') as f:
+    files = {{'pdf_file': (os.path.basename(PDF_PATH), f, 'application/pdf')}}
+    print("Enviando para extração...")
+    extract_response = requests.post(extract_url, files=files)
 
-headers = {{
-    "Content-Type": "application/json",
-    "Referer": "{BASE_URL}/",
-    "Origin": "{BASE_URL}",
-    "User-Agent": "Mozilla/5.0"
-}}
-
-response = requests.post(predict_url, headers=headers, json=payload)
-
-if response.status_code == 200:
-    extracted_text = response.json()["data"][0]
-    with open("texto_extraido.txt", "w", encoding="utf-8") as txt_file:
-        txt_file.write(extracted_text)
-    print("Texto extraído salvo em 'texto_extraido.txt'")
+if extract_response.status_code == 200:
+    print("Resposta recebida. Processando...")
+    result = extract_response.json()
+    if isinstance(result, list) and len(result) > 0:
+        extracted_text = result[0]
+        print("Salvando texto extraído...")
+        with open("texto_extraido.txt", "w", encoding="utf-8") as txt_file:
+            txt_file.write(extracted_text)
+        print("Texto extraído salvo em 'texto_extraido.txt'")
+    else:
+        print("Formato de resposta inesperado:", result)
 else:
-    print("Erro na predição:", response.status_code, response.text)
+    print("Erro na extração:", extract_response.status_code, extract_response.text)
 """
     return code_example
