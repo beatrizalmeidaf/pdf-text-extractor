@@ -2,7 +2,7 @@ import gradio as gr
 import logging
 from services.pdf_service import process_pdf_file as process_pdf
 from services.tika_service import check_tika_server
-from utils.file_utils import create_txt_file
+from utils.file_utils import create_text_file
 
 # obter logger
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ def extract_and_save(pdf_file):
     text, filename = process_pdf(pdf_file)
     if text and not text.startswith("Erro") and filename:
         # salvar o conteúdo internamente para download posterior
-        file_path = create_txt_file(text, filename)
+        file_path = create_text_file(text, filename)
         return text, filename, text
     return text, None, None
 
@@ -56,7 +56,7 @@ def create_main_interface():
             if not text or text.startswith("Erro") or not filename:
                 return None
             
-            file_path = create_txt_file(text, filename)
+            file_path = create_text_file(text, filename)
             return file_path
 
         download_btn.click(

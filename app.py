@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # definir função de carregamento da API (se necessário)
     demo.load(lambda: None, None, None, api_name="extract_text")
 
-    # sssociar função de interpretação da API
+    # associar função de interpretação da API
     @demo.interpret(fn=extract_and_save)
     def api_extract_text(pdf_file):
         return extract_and_save(pdf_file)
