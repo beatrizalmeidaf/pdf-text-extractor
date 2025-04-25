@@ -22,4 +22,4 @@ TEMP_DIR = tempfile.mkdtemp()
 logger.info(f"Diretório temporário criado: {TEMP_DIR}")
 
 # URL base da aplicação
-BASE_URL = "https://pdf-text-extractor-production-ad51.up.railway.app"
+API_BASE_URL = "https://pdf-text-extractor-production-ad51.up.railway.app"
