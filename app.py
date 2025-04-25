@@ -12,23 +12,26 @@ wait_for_tika()
 
 # iniciar o aplicativo 
 if __name__ == "__main__":
-    # criar uma aplicação que contém ambas interfaces
-    demo = gr.TabbedInterface(
-        [create_main_interface(), create_api_interface()],
-        ["Interface Principal", "Interface API"]
-    )
-
+    # criar uma aplicação usando Blocks para ter mais controle
+    with gr.Blocks() as demo:
+        # criar uma aplicação que contém ambas interfaces como abas
+        tabs = gr.TabbedInterface(
+            [create_main_interface(), create_api_interface()],
+            ["Interface Principal", "Interface API"]
+        )
+    
     # adicionar fila de processamento
     demo.queue(max_size=20)
-
-    # definir função de carregamento da API (se necessário)
-    demo.load(lambda: None, None, None, api_name="extract_text")
-
-    # associar função de interpretação da API
-    @demo.interpret(fn=extract_and_save)
-    def api_extract_text(pdf_file):
-        return extract_and_save(pdf_file)
-
+    
     # iniciar o servidor Gradio
     logger.info(f"Iniciando servidor na porta {PORT}")
+    
+
+    app = gr.mount_gradio_app(gr.App.create_app(demo), "/")
+    
+    @app.post("/api/extract_text")
+    async def api_extract_text_endpoint(pdf_file):
+        return extract_and_save(pdf_file)
+    
+    # iniciar o servidor
     demo.launch(server_name="0.0.0.0", server_port=PORT)
