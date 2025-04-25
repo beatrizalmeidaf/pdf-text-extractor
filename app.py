@@ -18,10 +18,10 @@ if __name__ == "__main__":
         with gr.Tabs():
             with gr.Tab("Interface Principal"):
                 create_main_interface()
-            with gr.Tab("Interface API"):
-                create_api_interface()
-        
-        
+          
+            # with gr.Tab("Interface API"):
+            #     create_api_interface()
+
         gr.Interface(
             fn=extract_and_save,
             inputs=gr.File(label="PDF File"),
@@ -31,8 +31,9 @@ if __name__ == "__main__":
                 gr.Textbox(label="Conteúdo do Texto")
             ],
             api_name="extract_text",
-            visible=False
+            visible=False  
         )
+
     
     # adicionar fila de processamento
     demo.queue(max_size=20)
