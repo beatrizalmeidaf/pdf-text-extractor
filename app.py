@@ -22,17 +22,6 @@ if __name__ == "__main__":
             # with gr.Tab("Interface API"):
             #     create_api_interface()
 
-        gr.Interface(
-            fn=extract_and_save,
-            inputs=gr.File(label="PDF File"),
-            outputs=[
-                gr.Textbox(label="Texto Extraído"),
-                gr.Textbox(label="Nome do Arquivo"),
-                gr.Textbox(label="Conteúdo do Texto")
-            ],
-            api_name="extract_text",
-            visible=False  
-        )
 
     
     # adicionar fila de processamento
