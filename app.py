@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 wait_for_tika()
 
 # criar API endpoint
-def create_api():
+def create_api_endpoint():
     return gr.Interface(
         fn=extract_and_save,
         inputs=gr.File(label="PDF File"),
@@ -22,7 +22,8 @@ def create_api():
         ],
         title="PDF Text Extractor API",
         description="API para extração de texto de PDFs",
-        allow_flagging="never"
+        allow_flagging="never",
+        api_name="extract_text"  
     )
 
 # iniciar o aplicativo 
@@ -30,7 +31,7 @@ if __name__ == "__main__":
     # criar interfaces
     main_interface = create_main_interface()
     api_interface = create_api_interface()
-    api_endpoint = create_api()
+    api_endpoint = create_api_endpoint()
     
     # criar uma aplicação que contém as interfaces como abas
     demo = gr.TabbedInterface(
@@ -38,6 +39,8 @@ if __name__ == "__main__":
         ["Interface Principal", "Interface API"]
     )
 
+    api = create_api_endpoint()
+    
     # adicionar fila de processamento
     demo.queue(max_size=20)
     
