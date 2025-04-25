@@ -100,7 +100,7 @@ payload = {{
         "is_file": True
     }}],
     "event_data": None,
-    "fn_index": 2,
+    "fn_index": 0,
     "session_hash": "t7xa5iimde"
 }}
 
