@@ -1,6 +1,6 @@
 import gradio as gr
 import logging
-from services.pdf_service import process_pdf
+from services.pdf_service import process_pdf_file as process_pdf
 from services.tika_service import check_tika_server
 from utils.file_utils import create_txt_file
 
