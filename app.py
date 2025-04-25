@@ -10,28 +10,42 @@ logger = logging.getLogger(__name__)
 # verificar conexão com o servidor Tika
 wait_for_tika()
 
+# criar API endpoint
+def create_api():
+    return gr.Interface(
+        fn=extract_and_save,
+        inputs=gr.File(label="PDF File"),
+        outputs=[
+            gr.Textbox(label="Texto Extraído"),
+            gr.Textbox(label="Nome do Arquivo"),
+            gr.Textbox(label="Conteúdo do Texto")
+        ],
+        title="PDF Text Extractor API",
+        description="API para extração de texto de PDFs",
+        allow_flagging="never"
+    )
+
 # iniciar o aplicativo 
 if __name__ == "__main__":
-    # criar uma aplicação usando Blocks para ter mais controle
-    with gr.Blocks() as demo:
-        # criar uma aplicação que contém ambas interfaces como abas
-        tabs = gr.TabbedInterface(
-            [create_main_interface(), create_api_interface()],
-            ["Interface Principal", "Interface API"]
-        )
+    # criar interfaces
+    main_interface = create_main_interface()
+    api_interface = create_api_interface()
+    api_endpoint = create_api()
     
+    # criar uma aplicação que contém as interfaces como abas
+    demo = gr.TabbedInterface(
+        [main_interface, api_interface],
+        ["Interface Principal", "Interface API"]
+    )
+
     # adicionar fila de processamento
     demo.queue(max_size=20)
     
     # iniciar o servidor Gradio
     logger.info(f"Iniciando servidor na porta {PORT}")
-    
-
-    app = gr.mount_gradio_app(gr.App.create_app(demo), "/")
-    
-    @app.post("/api/extract_text")
-    async def api_extract_text_endpoint(pdf_file):
-        return extract_and_save(pdf_file)
-    
-    # iniciar o servidor
     demo.launch(server_name="0.0.0.0", server_port=PORT)
+    
+    # iniciar API endpoint separadamente 
+    api_port = PORT + 1
+    logger.info(f"Iniciando API endpoint na porta {api_port}")
+    api_endpoint.launch(server_name="0.0.0.0", server_port=api_port, share=False)
