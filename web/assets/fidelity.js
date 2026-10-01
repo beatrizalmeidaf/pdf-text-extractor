@@ -42,7 +42,9 @@ export async function referenceItems(pdf, numbers) {
 }
 
 // Case, accents and ligatures out of the way: "ﬁ" = "fi", "´e" = "é" = "e".
-const fold = (text) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+// An exponent is a number of its own: "10⁹" is "10" and "9", as the PDF has them.
+const SCRIPTS = /([\u00b2\u00b3\u00b9\u2070-\u209f]+)/g;
+const fold = (text) => text.replace(SCRIPTS, " $1 ").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
 const tokens = (text) => fold(text).match(TOKEN) || [];
 
 function pageOutput(page) {
@@ -60,8 +62,8 @@ function coverage(items, output) {
   const out = tokens(output);
   for (const t of out) have.set(t, (have.get(t) || 0) + 1);
   // Without separators: a word hyphenated at a line end, or split by an accent drawn as its
-  // own glyph, is still there. Not for numbers: "30" is inside too many other things, and
-  // the cells of a table that was lost would all be "found".
+  // own glyph, is still there — and so is "10⁹" read as "109". Not for short numbers: "30" is
+  // inside too many other things, and the cells of a lost table would all be "found".
   const stream = out.join("");
   let matched = 0, total = 0;
   const missing = [];
@@ -71,7 +73,7 @@ function coverage(items, output) {
       if (token.length < 2) continue;
       own += token.length;
       if (have.get(token) > 0) { have.set(token, have.get(token) - 1); found += token.length; }
-      else if (!/^\p{Nd}+$/u.test(token) && stream.includes(token)) found += token.length;
+      else if (!/^\p{Nd}{1,2}$/u.test(token) && stream.includes(token)) found += token.length;
     }
     total += own;
     matched += found;
