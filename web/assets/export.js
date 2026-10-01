@@ -2,6 +2,7 @@
 // plus XLSX/DOCX writers (plain OOXML zipped with JSZip, no heavy dependencies).
 
 import { bands } from "./columns.js";
+import { inlineLatex, latexify, mathSpans, scriptText } from "./mathtext.js";
 
 const FURNITURE = new Set(["header", "footer", "page_number"]);
 const BOM = String.fromCharCode(0xfeff); // lets Notepad/Excel detect UTF-8 (accents)
@@ -13,18 +14,22 @@ export const tablesOf = (doc) => allBlocks(doc).filter((b) => b.type === "table"
 export const imagesOf = (doc) => allBlocks(doc).filter((b) => b.image && b.image.data);
 
 // ---------------------------------------------------------------- text
-export function blocksToText(blocks) {
+// `math`: "unicode" (as it reads: "x² + 1 = 0") or "latex" ("$x^{2} + 1 = 0$").
+export function blocksToText(blocks, math = "unicode") {
+  const latex = math === "latex";
   return blocks
     .map((b) => {
+      const text = latex && b.type !== "formula" && b.type !== "code" ? inlineLatex(b.text || "") : b.text || "";
       if (b.type === "table" && b.rows) return b.rows.map((r) => r.map((c) => c.replace(/\n/g, " ")).join("\t")).join("\n");
-      if (b.type === "list_item") return "  ".repeat(b.level || 0) + `${b.marker || "-"} ${b.text}`;
-      if (b.type === "formula") return b.text + (b.number ? `  ${b.number}` : "");
-      return b.text || "";
+      if (b.type === "list_item") return "  ".repeat(b.level || 0) + `${b.marker || "-"} ${text}`;
+      if (b.type === "formula") return (latex ? `$$${b.latex || b.text}$$` : b.text) + (b.number ? `  ${b.number}` : "");
+      return text;
     })
     .filter((t) => t.trim())
     .join("\n\n");
 }
-export const toText = (doc) => doc.pages.map((p) => blocksToText(contentBlocks(p))).filter((t) => t.trim()).join("\n\n");
+export const toText = (doc, { math = "unicode" } = {}) =>
+  doc.pages.map((p) => blocksToText(contentBlocks(p), math)).filter((t) => t.trim()).join("\n\n");
 
 // ---------------------------------------------------------------- markdown
 const mdCell = (t) => String(t).replace(/\|/g, "\\|").replace(/\n/g, "<br>").trim();
@@ -50,17 +55,56 @@ export function figureWords(text) {
     .filter((ln) => /\p{L}/u.test(ln));
 }
 // Inline formatting as Markdown: **bold**, *italic*, <sup>/<sub>; markers hug the words.
-function mdInline(b) {
+// **bold** / *italic* around the words, the spaces at either end left outside.
+function emphasis(text, bold, italic) {
+  const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text);
+  if (!core) return text;
+  let t = core;
+  if (italic) t = `*${t}*`;
+  if (bold) t = `**${t}**`;
+  return lead + t + trail;
+}
+function mdInline(b, math = "unicode") {
+  if (math === "latex") return mdInlineLatex(b);
   if (!b.runs?.length) return (b.text || "").replace(/\n/g, "  \n");
   return b.runs.map((r) => {
     const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(r.text);
     if (!core) return r.text;
     let t = core.replace(/\*/g, "\\*");
     if (r.script) t = r.script === "super" ? `<sup>${t}</sup>` : `<sub>${t}</sub>`;
-    if (r.italic) t = `*${t}*`;
-    if (r.bold) t = `**${t}**`;
-    return lead + t + trail;
+    return lead + emphasis(t, r.bold, r.italic) + trail;
   }).join("").replace(/\n/g, "  \n");
+}
+// The block with its math as `$…$` (exponents and indices inside it), bold and italic kept on
+// the words around.
+function mdInlineLatex(b) {
+  let text = "";
+  const looks = []; // "bold,italic" of each character
+  for (const r of b.runs?.length ? b.runs : [{ text: b.text || "" }]) {
+    let t = r.text;
+    if (r.script) t = scriptText(t.trim(), r.script === "super") + (/\s$/.test(t) ? " " : "");
+    text += t;
+    for (let k = 0; k < t.length; k++) looks.push(`${!!r.bold},${!!r.italic}`);
+  }
+  const plain = (start, end) => {
+    let out = "", at = start;
+    for (let k = start; k <= end; k++) {
+      if (k === end || looks[k] !== looks[at]) {
+        if (at < k) {
+          const piece = text.slice(at, k).replace(/\*/g, "\\*").replace(/\$/g, "\\$");
+          out += emphasis(piece, looks[at].startsWith("true"), looks[at].endsWith("true"));
+        }
+        at = k;
+      }
+    }
+    return out;
+  };
+  let out = "", at = 0;
+  for (const [start, end] of mathSpans(text)) {
+    out += plain(at, start) + "$" + latexify(text.slice(start, end)) + "$";
+    at = end;
+  }
+  return (out + plain(at, text.length)).replace(/\n/g, "  \n");
 }
 function htmlInline(b) {
   const br = (t) => esc(t).replace(/\n/g, "<br>");
@@ -81,14 +125,15 @@ function htmlStyle(b) {
   if (f.line_spacing) out.push(`line-height:${Math.round(f.line_spacing * 115) / 100}`);
   return out.length ? ` style="${out.join(";")}"` : "";
 }
-export function blockMarkdown(b, images = "ref") {
+export function blockMarkdown(b, images = "ref", math = "unicode") {
+  const text = math === "latex" ? inlineLatex(b.text || "") : b.text;
   switch (b.type) {
     case "heading":
-      return "#".repeat(Math.min(6, Math.max(1, b.level || 2))) + " " + b.text.replace(/\n/g, " ");
+      return "#".repeat(Math.min(6, Math.max(1, b.level || 2))) + " " + text.replace(/\n/g, " ");
     case "list_item": {
       let marker = b.marker || "-";
       if (BULLET_CHARS.includes(marker[0])) marker = "-";
-      return "  ".repeat(b.level || 0) + `${marker} ${mdInline(b)}`;
+      return "  ".repeat(b.level || 0) + `${marker} ${mdInline(b, math)}`;
     }
     case "table":
       return b.rows ? mdTable(b.rows) : b.text;
@@ -104,22 +149,24 @@ export function blockMarkdown(b, images = "ref") {
       return out;
     }
     case "caption":
-      return `*${b.text}*`;
+      return `*${text}*`;
     case "code":
       return "```\n" + b.text + "\n```";
     default:
-      return mdInline(b);
+      return mdInline(b, math);
   }
 }
-export function toMarkdown(doc, { images = "ref", pageBreaks = false } = {}) {
+export function toMarkdown(doc, { images = "ref", pageBreaks = false, math = "unicode" } = {}) {
   const out = [];
   doc.pages.forEach((page) => {
     if (pageBreaks && out.length) out.push(`<!-- página ${page.number} -->`);
     let prev = null;
     for (const b of contentBlocks(page)) {
-      const md = blockMarkdown(b, images);
+      const md = blockMarkdown(b, images, math);
       if (!md.trim()) continue;
-      if (prev && prev.type === "list_item" && b.type === "list_item" && out.length) out[out.length - 1] += "\n" + md;
+      // Consecutive list items stay tight. "a) …" is not a list to Markdown, which would run
+      // such lines together: they end in a hard break.
+      if (prev && prev.type === "list_item" && b.type === "list_item" && out.length) out[out.length - 1] += (/^\s*(-|[0-9]+[.)]) /.test(md) ? "\n" : "  \n") + md;
       else out.push(md);
       prev = b;
     }
@@ -502,10 +549,10 @@ export async function toDocx(doc) {
 }
 
 // ---------------------------------------------------------------- zip bundle
-export async function toZip(doc, stem) {
+export async function toZip(doc, stem, { math = "unicode" } = {}) {
   const zip = new JSZip();
-  zip.file(`${stem}.md`, toMarkdown(doc, { images: "ref" }));
-  zip.file(`${stem}.txt`, toText(doc));
+  zip.file(`${stem}.md`, toMarkdown(doc, { images: "ref", math }));
+  zip.file(`${stem}.txt`, toText(doc, { math }));
   zip.file(`${stem}.html`, toHtml(doc, { images: "ref" }));
   zip.file(`${stem}.json`, toJson(doc, { embedImages: false }));
   if (tablesOf(doc).length) zip.file(`${stem}-tabelas.csv`, "\uFEFF" + tablesCsv(doc));
@@ -525,17 +572,17 @@ export const FORMATS = [
   { id: "zip", label: "Pacote ZIP", ext: "zip", hint: "tudo + pasta images/" },
 ];
 
-export async function exportAs(doc, format, stem) {
+export async function exportAs(doc, format, stem, { math = "unicode" } = {}) {
   const text = (s, type) => new Blob([s], { type: `${type};charset=utf-8` });
   switch (format) {
-    case "md": return text(toMarkdown(doc, { images: "embed" }), "text/markdown");
-    case "txt": return text(BOM + toText(doc), "text/plain"); // BOM: Notepad/Excel read UTF-8
+    case "md": return text(toMarkdown(doc, { images: "embed", math }), "text/markdown");
+    case "txt": return text(BOM + toText(doc, { math }), "text/plain"); // BOM: Notepad/Excel read UTF-8
     case "html": return text(toHtml(doc, { images: "embed" }), "text/html");
     case "json": return text(toJson(doc, { embedImages: true }), "application/json");
     case "csv": return text("\uFEFF" + tablesCsv(doc), "text/csv");
     case "xlsx": return toXlsx(doc);
     case "docx": return toDocx(doc);
-    case "zip": return toZip(doc, stem);
+    case "zip": return toZip(doc, stem, { math });
     default: throw new Error(`Formato desconhecido: ${format}`);
   }
 }
