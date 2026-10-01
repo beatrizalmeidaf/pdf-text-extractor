@@ -1,0 +1,475 @@
+import { extractDocument, openPdf } from "./engine.js";
+import { FORMATS, esc, exportAs, imagesOf, tablesCsv, tablesOf, toJson, toMarkdown, toText } from "./export.js";
+
+const $ = (s) => document.querySelector(s);
+const TYPE_LABEL = {
+  heading: "Título", paragraph: "Parágrafo", list_item: "Item de lista", table: "Tabela", figure: "Figura",
+  formula: "Fórmula", caption: "Legenda", code: "Código", header: "Cabeçalho", footer: "Rodapé", page_number: "Nº de página",
+};
+const typeColor = (t) => `var(--t-${["header", "footer", "page_number"].includes(t) ? "furniture" : t})`;
+const store = {
+  get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+
+const state = { file: null, data: null, doc: null, pdf: null, hidden: new Set(["header", "footer", "page_number"]), selected: null };
+
+// ---------------------------------------------------------------- small UI helpers
+let toastTimer;
+function toast(msg, err = false) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "toast on" + (err ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.className = "toast"), err ? 6000 : 2500);
+}
+function setProgress(frac) {
+  const p = $("#progress");
+  p.classList.toggle("on", frac !== null);
+  p.firstElementChild.style.width = `${Math.round((frac ?? 0) * 100)}%`;
+}
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const stem = () => (state.file?.name || "documento").replace(/\.[^.]+$/, "") || "documento";
+const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`);
+
+// ---------------------------------------------------------------- theme
+$("#theme-btn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  store.set("pte-theme", root.dataset.theme);
+});
+
+// ---------------------------------------------------------------- engine choice
+const engineInputs = document.querySelectorAll('input[name="engine"]');
+const serverUrl = $("#server-url");
+function engine() { return document.querySelector('input[name="engine"]:checked').value; }
+function syncEngine() {
+  const server = engine() === "server";
+  $("#server-field").hidden = !server;
+  $("#engine-hint").textContent = server
+    ? "O arquivo vai para a sua API: Tika + PDFium, OCR e outros formatos."
+    : "Nada sai do seu computador: o PDF é lido aqui mesmo, com pdf.js.";
+  $("#privacy-text").textContent = server
+    ? "No modo servidor o arquivo é enviado à URL acima e apagado ao fim da requisição."
+    : "No modo navegador o arquivo não é enviado a lugar nenhum.";
+  $("#file").accept = server ? "" : "application/pdf,.pdf";
+  $("#drop strong").textContent = server ? "Arraste um documento aqui" : "Arraste um PDF aqui";
+  store.set("pte-engine", engine());
+}
+engineInputs.forEach((i) => i.addEventListener("change", syncEngine));
+serverUrl.value = store.get("pte-server", "");
+serverUrl.addEventListener("change", () => store.set("pte-server", serverUrl.value.trim()));
+
+(async function detectServer() {
+  // Served by the API itself? Then default to it (same origin, Tika available).
+  const saved = store.get("pte-engine", null);
+  if (document.documentElement.dataset.api === "same-origin") {
+    try {
+      const r = await fetch(`${location.origin}/health`, { cache: "no-store" });
+      if (r.ok && (await r.json()).status === "ok") {
+        if (!serverUrl.value) serverUrl.value = location.origin;
+        if (saved !== "browser") document.querySelector('input[value="server"]').checked = true;
+      }
+    } catch { /* static hosting */ }
+  } else if (saved === "server" && serverUrl.value) {
+    document.querySelector('input[value="server"]').checked = true;
+  }
+  syncEngine();
+})();
+
+// ---------------------------------------------------------------- file input
+const drop = $("#drop");
+const fileInput = $("#file");
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); } });
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && setFile(e.dataTransfer.files[0]));
+fileInput.addEventListener("change", () => fileInput.files[0] && setFile(fileInput.files[0]));
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); });
+
+async function setFile(file) {
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  if (!isPdf && engine() === "browser") {
+    toast("No navegador só PDFs. Para DOCX, PPTX, XLSX ou HTML, use o modo Servidor (Tika).", true);
+    return;
+  }
+  state.file = file;
+  state.data = await file.arrayBuffer();
+  $("#file-name").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
+  $("#run-btn").disabled = false;
+  run();
+}
+
+$("#sample-btn").addEventListener("click", async () => {
+  try {
+    const r = await fetch("assets/exemplo.pdf");
+    const blob = await r.blob();
+    await setFile(new File([blob], "exemplo.pdf", { type: "application/pdf" }));
+  } catch {
+    toast("Não consegui carregar o exemplo.", true);
+  }
+});
+
+// ---------------------------------------------------------------- extraction
+$("#run-btn").addEventListener("click", run);
+["opt-tables", "opt-formulas", "opt-images"].forEach((id) => $("#" + id).addEventListener("change", () => state.data && run()));
+
+let running = false;
+async function run() {
+  if (!state.data || running) return;
+  running = true;
+  const btn = $("#run-btn");
+  btn.disabled = true;
+  setProgress(0.02);
+  const opts = {
+    pages: $("#pages").value.trim() || undefined,
+    password: $("#password").value || undefined,
+    tables: $("#opt-tables").checked,
+    formulas: $("#opt-formulas").checked,
+    images: $("#opt-images").checked,
+  };
+  try {
+    const isPdf = state.file.type === "application/pdf" || /\.pdf$/i.test(state.file.name);
+    let doc;
+    if (engine() === "server") {
+      doc = await extractOnServer(opts);
+      state.pdf = isPdf ? await openPdf(state.data.slice(0), opts.password).catch(() => null) : null;
+    } else {
+      const res = await extractDocument(state.data.slice(0), { ...opts, onProgress: (d, t) => setProgress(d / t) });
+      doc = res.doc;
+      state.pdf = res.pdf;
+    }
+    state.doc = doc;
+    state.selected = null;
+    render();
+  } catch (e) {
+    console.error(e);
+    toast(e.message || "Falha na extração.", true);
+  } finally {
+    running = false;
+    btn.disabled = false;
+    setProgress(null);
+  }
+}
+
+async function extractOnServer(opts) {
+  const base = (serverUrl.value.trim() || location.origin).replace(/\/+$/, "");
+  const q = new URLSearchParams({ per_page: "true", images: String(opts.images), tables: String(opts.tables), formulas: String(opts.formulas) });
+  if (opts.pages) q.set("pages", opts.pages);
+  const form = new FormData();
+  form.append("file", state.file);
+  if (opts.password) form.append("password", opts.password);
+  setProgress(0.3);
+  let r;
+  try {
+    r = await fetch(`${base}/v1/extract?${q}`, { method: "POST", body: form });
+  } catch {
+    throw new Error(`Não consegui falar com ${base}. A API está no ar e com CORS liberado?`);
+  }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body?.error?.message || `Erro ${r.status} na API.`);
+  setProgress(0.9);
+  return body;
+}
+
+// ---------------------------------------------------------------- render
+function render() {
+  const doc = state.doc;
+  const blocks = doc.pages.flatMap((p) => p.blocks);
+  const count = (t) => blocks.filter((b) => b.type === t).length;
+  const tables = tablesOf(doc), images = imagesOf(doc);
+  $("#n-tables").textContent = tables.length;
+  $("#n-images").textContent = images.length;
+  const stats = $("#stats");
+  stats.hidden = false;
+  const t = doc.timings || {};
+  stats.innerHTML = [
+    `<span><b>${doc.pages_extracted ?? doc.pages.length}</b>/${doc.page_count} páginas</span>`,
+    `<span><b>${fmtMs(doc.elapsed_ms)}</b>${t.tika_ms ? ` (Tika ${fmtMs(t.tika_ms)} ‖ layout ${fmtMs(t.layout_ms)})` : ""}</span>`,
+    `<span><b>${count("heading")}</b> títulos</span>`,
+    `<span><b>${tables.length}</b> tabelas</span>`,
+    `<span><b>${count("figure")}</b> figuras</span>`,
+    `<span><b>${count("formula")}</b> fórmulas</span>`,
+    `<span>motor: <b>${esc(doc.engine)}</b></span>`,
+    doc.likely_scanned ? `<span class="warn">parece escaneado — use o modo servidor com OCR</span>` : "",
+    ...(doc.warnings || []).map((w) => `<span class="warn">${esc(w.split(":")[0])}</span>`),
+  ].join("");
+  $("#copy-btn").disabled = false;
+  $("#export-btn").disabled = false;
+  $("#empty").hidden = true;
+  $("#viewer").hidden = false;
+  renderLegend(blocks);
+  renderPages();
+  renderMarkdown();
+  renderTables(tables);
+  renderGallery(images);
+  $("#text-out").textContent = toText(doc);
+  $("#json-out").textContent = toJson(doc, { embedImages: false });
+  showInspector(null);
+}
+
+function renderLegend(blocks) {
+  const present = [...new Set(blocks.map((b) => b.type))];
+  const legend = $("#legend");
+  legend.innerHTML = "";
+  for (const t of Object.keys(TYPE_LABEL).filter((x) => present.includes(x))) {
+    const n = blocks.filter((b) => b.type === t).length;
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.type = "button";
+    chip.style.setProperty("--c", typeColor(t));
+    chip.setAttribute("aria-pressed", String(!state.hidden.has(t)));
+    chip.innerHTML = `<i></i>${TYPE_LABEL[t]} <span style="color:var(--muted)">${n}</span>`;
+    chip.addEventListener("click", () => {
+      state.hidden.has(t) ? state.hidden.delete(t) : state.hidden.add(t);
+      chip.setAttribute("aria-pressed", String(!state.hidden.has(t)));
+      document.querySelectorAll(`.box[data-type="${t}"]`).forEach((el) => (el.hidden = state.hidden.has(t)));
+    });
+    legend.append(chip);
+  }
+}
+
+let observer;
+function renderPages() {
+  const list = $("#pages-list");
+  list.innerHTML = "";
+  observer?.disconnect();
+  const avail = Math.min(list.clientWidth || 800, 900);
+  observer = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); paintPage(e.target); }
+  }, { rootMargin: "400px" });
+  for (const page of state.doc.pages) {
+    const w = page.width || 595, h = page.height || 842;
+    const scale = avail / w;
+    const wrap = document.createElement("div");
+    wrap.className = "page-wrap";
+    wrap.style.width = `${w * scale}px`;
+    wrap.style.height = `${h * scale}px`;
+    wrap.dataset.page = page.number;
+    wrap.dataset.scale = scale;
+    wrap.innerHTML = `<span class="page-label">p. ${page.number}</span>`;
+    for (const b of page.blocks) {
+      if (!b.bbox || !page.width) continue;
+      const [x0, y0, x1, y1] = b.bbox;
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "box";
+      el.dataset.type = b.type;
+      el.dataset.id = b.id;
+      el.hidden = state.hidden.has(b.type);
+      el.style.cssText = `--c:${typeColor(b.type)};left:${x0 * scale - 1}px;top:${y0 * scale}px;width:${(x1 - x0) * scale + 2}px;height:${(y1 - y0) * scale}px`;
+      el.setAttribute("aria-label", `${TYPE_LABEL[b.type] || b.type}: ${(b.text || "").slice(0, 80)}`);
+      el.innerHTML = `<span class="tag">${TYPE_LABEL[b.type] || b.type}${b.level ? " " + b.level : ""}</span>`;
+      el.addEventListener("click", () => select(b, el));
+      wrap.append(el);
+    }
+    list.append(wrap);
+    observer.observe(wrap);
+  }
+  if (!state.doc.pages.some((p) => p.width)) {
+    list.innerHTML = `<p class="hint">Este formato não tem páginas com posição (o Tika lê o conteúdo, não o layout). Veja as abas Markdown e Tabelas.</p>`;
+  }
+}
+
+async function paintPage(wrap) {
+  if (!state.pdf) return;
+  const scale = parseFloat(wrap.dataset.scale);
+  const page = await state.pdf.getPage(parseInt(wrap.dataset.page, 10));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const viewport = page.getViewport({ scale: scale * dpr, rotation: 0 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  canvas.style.width = `${viewport.width / dpr}px`;
+  canvas.style.height = `${viewport.height / dpr}px`;
+  wrap.prepend(canvas);
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+}
+
+function select(block, el) {
+  document.querySelectorAll(".box.sel").forEach((x) => x.classList.remove("sel"));
+  el?.classList.add("sel");
+  state.selected = block;
+  showInspector(block);
+}
+
+function showInspector(b) {
+  const box = $("#inspector");
+  if (!b) {
+    box.innerHTML = `<h3>Clique num bloco</h3><p class="hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>`;
+    return;
+  }
+  let content = esc(b.text || "");
+  if (b.type === "table" && b.rows) content = esc(b.rows.map((r) => r.join(" | ")).join("\n"));
+  const extra = [
+    b.level != null ? `<span>nível</span><b>${b.level}</b>` : "",
+    b.marker ? `<span>marcador</span><b>${esc(b.marker)}</b>` : "",
+    b.number ? `<span>número</span><b>${esc(b.number)}</b>` : "",
+    b.caption ? `<span>legenda</span><b>${esc(b.caption)}</b>` : "",
+    b.style ? `<span>fonte</span><b>${b.style.size} pt${b.style.bold ? " · negrito" : ""}</b>` : "",
+  ].join("");
+  box.innerHTML = `
+    <h3><span class="type-dot" style="--c:${typeColor(b.type)}"></span>${TYPE_LABEL[b.type] || b.type}</h3>
+    <div class="kv"><span>id</span><b>${esc(b.id)}</b><span>bbox</span><b>${b.bbox ? b.bbox.map((v) => v.toFixed(1)).join(", ") : "—"}</b>${extra}</div>
+    ${b.latex ? `<div class="kv"><span>LaTeX</span><b>${esc(b.latex)}</b></div><div id="insp-math"></div>` : ""}
+    <pre>${content || "<em>(sem texto)</em>"}</pre>
+    ${b.image?.data ? `<img alt="Recorte do bloco" src="data:${b.image.mime};base64,${b.image.data}">` : ""}`;
+  if (b.latex && window.katex) {
+    try { window.katex.render(b.latex, box.querySelector("#insp-math"), { displayMode: true, throwOnError: false }); } catch { /* keep text */ }
+  }
+}
+
+function renderMarkdown() {
+  const md = toMarkdown(state.doc, { images: "embed" });
+  $("#md-source").textContent = toMarkdown(state.doc, { images: "ref" });
+  const target = $("#md-rendered");
+  if (window.marked && window.DOMPurify) {
+    // $$…$$ blocks are swapped for placeholders so Markdown can't mangle the LaTeX
+    // (a "_" would become italics), then KaTeX renders them after sanitizing.
+    const formulas = [];
+    const protectedMd = md.replace(/\$\$\n([\s\S]*?)\n\$\$/g, (_, tex) => {
+      formulas.push(tex);
+      return `<div class="math-ph" data-i="${formulas.length - 1}"></div>`;
+    });
+    const html = window.marked.parse(protectedMd, { gfm: true, breaks: false });
+    target.innerHTML = window.DOMPurify.sanitize(html);
+    target.querySelectorAll(".math-ph").forEach((el) => {
+      const tex = formulas[+el.dataset.i] ?? "";
+      if (window.katex) window.katex.render(tex, el, { displayMode: true, throwOnError: false });
+      else el.textContent = `$$ ${tex} $$`;
+    });
+  } else {
+    target.textContent = md;
+  }
+}
+document.querySelectorAll('input[name="mdmode"]').forEach((i) =>
+  i.addEventListener("change", () => {
+    const src = i.value === "source" && i.checked;
+    $("#md-source").hidden = !src;
+    $("#md-rendered").hidden = src;
+  }));
+
+function renderTables(tables) {
+  const list = $("#tables-list");
+  if (!tables.length) {
+    list.innerHTML = `<p class="hint">Nenhuma tabela encontrada${$("#opt-tables").checked ? "" : " (a detecção está desligada)"}.</p>`;
+    return;
+  }
+  list.innerHTML = "";
+  tables.forEach((t, k) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    const page = t.id.split("-")[0].slice(1);
+    const head = t.rows[0].map((c) => `<th>${esc(c)}</th>`).join("");
+    const body = t.rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${esc(c).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`).join("");
+    card.innerHTML = `
+      <header><b>Tabela ${k + 1}</b><span class="meta">p. ${page} · ${t.rows.length} × ${Math.max(...t.rows.map((r) => r.length))}${t.caption ? " · " + esc(t.caption) : ""}</span>
+        <span class="spacer"></span>
+        <button class="btn small-btn" data-act="copy" type="button">Copiar CSV</button>
+        <button class="btn small-btn" data-act="show" type="button">Ver na página</button></header>
+      <div class="body"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+        ${t.image?.data ? `<img class="crop" alt="Recorte da tabela ${k + 1}" src="data:${t.image.mime};base64,${t.image.data}">` : ""}</div>`;
+    card.querySelector('[data-act="copy"]').addEventListener("click", async () => {
+      const one = { ...state.doc, pages: [{ blocks: [t] }] };
+      await navigator.clipboard.writeText(tablesCsv(one).split("\r\n").slice(1).join("\n"));
+      toast("CSV copiado");
+    });
+    card.querySelector('[data-act="show"]').addEventListener("click", () => jumpTo(t));
+    list.append(card);
+  });
+}
+
+function renderGallery(images) {
+  const g = $("#gallery");
+  if (!images.length) {
+    g.innerHTML = `<p class="hint">Nenhuma imagem${$("#opt-images").checked ? "" : " — ative “Recortar imagens” nas opções"}.</p>`;
+    return;
+  }
+  g.innerHTML = "";
+  for (const b of images) {
+    const fig = document.createElement("figure");
+    fig.innerHTML = `<div class="thumb"><img alt="${esc(TYPE_LABEL[b.type])} ${esc(b.caption || "")}" src="data:${b.image.mime};base64,${b.image.data}"></div>
+      <figcaption><span class="type-dot" style="--c:${typeColor(b.type)}"></span><span title="${esc(b.caption || b.image.name)}">${esc(b.caption || b.image.name)}</span>
+      <button class="btn small-btn" type="button">PNG</button></figcaption>`;
+    fig.querySelector("button").addEventListener("click", async () => {
+      const blob = await (await fetch(`data:${b.image.mime};base64,${b.image.data}`)).blob();
+      download(blob, b.image.name);
+    });
+    fig.querySelector(".thumb").addEventListener("click", () => jumpTo(b));
+    g.append(fig);
+  }
+}
+
+function jumpTo(block) {
+  switchTab("pages");
+  const el = document.querySelector(`.box[data-id="${block.id}"]`);
+  if (el) {
+    el.hidden = false;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    select(block, el);
+  }
+}
+
+// ---------------------------------------------------------------- tabs, copy, export
+function switchTab(view) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+  document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== `view-${view}`));
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.view)));
+
+$("#copy-btn").addEventListener("click", async () => {
+  if (!state.doc) return;
+  await navigator.clipboard.writeText(toMarkdown(state.doc, { images: "ref" }));
+  toast("Markdown copiado");
+});
+
+const menu = $("#export-menu");
+const list = $("#export-list");
+list.innerHTML = FORMATS.map((f) => `<button role="menuitem" type="button" data-fmt="${f.id}"><span class="ext">.${f.ext}</span><span>${f.label}<small>${f.hint}</small></span></button>`).join("");
+$("#export-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = !menu.classList.contains("open");
+  menu.classList.toggle("open", open);
+  $("#export-btn").setAttribute("aria-expanded", String(open));
+  if (open) list.querySelector("button").focus();
+});
+document.addEventListener("click", () => { menu.classList.remove("open"); $("#export-btn").setAttribute("aria-expanded", "false"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.classList.remove("open"); });
+list.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-fmt]");
+  if (!btn || !state.doc) return;
+  const f = FORMATS.find((x) => x.id === btn.dataset.fmt);
+  try {
+    if ((f.id === "csv" || f.id === "xlsx") && !tablesOf(state.doc).length) toast("Nenhuma tabela neste documento — o arquivo sairá vazio.");
+    if (!window.JSZip && ["xlsx", "docx", "zip"].includes(f.id)) throw new Error("Biblioteca de ZIP não carregou; verifique a conexão.");
+    const blob = await exportAs(state.doc, f.id, stem());
+    download(blob, `${stem()}${f.id === "csv" ? "-tabelas" : ""}.${f.ext}`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+// Re-fit the pages when the viewer width changes (rotation, window resize).
+let lastWidth = 0;
+let resizeTimer;
+new ResizeObserver(([entry]) => {
+  const w = Math.round(entry.contentRect.width);
+  if (!state.doc || Math.abs(w - lastWidth) < 40) return;
+  lastWidth = w;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const id = state.selected?.id;
+    renderPages();
+    if (id) document.querySelector(`.box[data-id="${id}"]`)?.classList.add("sel");
+  }, 150);
+}).observe($("#pages-list"));

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF para Markdown, JSON e Excel — Extrator de PDF open source</title>
+  <meta name="description" content="Converta PDF em Markdown, JSON, HTML, Word, Excel e CSV direto no navegador, sem enviar o arquivo. Mantém a ordem de leitura em colunas, extrai tabelas estruturadas, fórmulas em LaTeX, imagens e a posição de cada bloco. Open source, com API baseada em Apache Tika.">
+  <meta name="keywords" content="pdf para markdown, pdf to markdown, pdf to json, extrair tabelas de pdf, pdf table extraction, pdf para excel, pdf para word, pdf parser, pdf text extraction, extrair texto de pdf, ocr, apache tika, rag, llm, document parsing, layout analysis, reading order, fórmulas latex, pdf.js, open source">
+  <meta name="author" content="Beatriz Almeida">
+  <meta name="theme-color" content="#c2410c">
+  <link rel="canonical" href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="PDF para Markdown, tabelas e fórmulas — no navegador">
+  <meta property="og:description" content="Extração estruturada de PDFs: ordem de leitura, tabelas, fórmulas em LaTeX, imagens e posições. Exporte para Markdown, JSON, Excel, Word, CSV ou HTML.">
+  <meta property="og:url" content="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c2410c'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='12' font-weight='700' fill='white' text-anchor='middle'%3EPDF%3C/text%3E%3C/svg%3E">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "PDF Text Extractor",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Web, Windows, macOS, Linux",
+    "description": "Extração estruturada de PDFs para Markdown, JSON, Excel, Word e CSV: ordem de leitura, tabelas, fórmulas, imagens e posições. Biblioteca Python, CLI, API REST (Apache Tika) e app web.",
+    "url": "https://beatrizalmeidaf.github.io/pdf-text-extractor/",
+    "codeRepository": "https://github.com/beatrizalmeidaf/pdf-text-extractor",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" }
+  }
+  </script>
+  <script>
+    // Theme before first paint (no flash).
+    try { const t = localStorage.getItem("pte-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="PDF Text Extractor — início">
+      <span class="brand-mark" aria-hidden="true">PDF</span>
+      <span>PDF Text Extractor<small>estrutura, tabelas e fórmulas</small></span>
+    </a>
+    <nav>
+      <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor#readme" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span class="label">Documentação</span>
+      </a>
+      <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.7.1-.7 1.2.1 1.9 1.3 1.9 1.3 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+        <span class="label">GitHub</span>
+      </a>
+      <button class="icon-btn" id="theme-btn" type="button" aria-label="Alternar tema claro/escuro">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </nav>
+  </header>
+
+  <main class="app">
+    <aside class="panel sidebar" aria-label="Arquivo e opções">
+      <div class="intro">
+        <h1>PDF para Markdown, tabelas e fórmulas</h1>
+        <p>Ordem de leitura em colunas, tabelas estruturadas, LaTeX, imagens e a posição de cada bloco. Exporte no formato que precisar.</p>
+      </div>
+
+      <div class="drop" id="drop" role="button" tabindex="0" aria-describedby="drop-hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+        <strong>Arraste um PDF aqui</strong>
+        <span id="drop-hint">ou clique para escolher</span>
+        <div class="file-name" id="file-name"></div>
+        <input type="file" id="file" class="sr-only" accept="application/pdf,.pdf">
+      </div>
+      <p class="hint" style="text-align:center;margin-top:-8px">Sem um PDF à mão? <button type="button" class="sample-link" id="sample-btn">Use o exemplo</button></p>
+
+      <fieldset>
+        <legend>Motor</legend>
+        <div class="segmented" role="radiogroup" aria-label="Motor de extração">
+          <label><input type="radio" name="engine" value="browser" checked><span>No navegador</span></label>
+          <label><input type="radio" name="engine" value="server"><span>Servidor (Tika)</span></label>
+        </div>
+        <p class="hint" id="engine-hint">Nada sai do seu computador: o PDF é lido aqui mesmo, com pdf.js.</p>
+        <div class="field" id="server-field" hidden>
+          <label for="server-url">URL da API</label>
+          <input type="url" id="server-url" placeholder="http://localhost:8000" autocomplete="url">
+          <p class="hint">Suba a sua com <code>docker compose up</code>. Aceita também DOCX, PPTX, XLSX, HTML e EPUB, e faz OCR de escaneados.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Opções</legend>
+        <div class="row-2">
+          <div class="field">
+            <label for="pages">Páginas</label>
+            <input type="text" id="pages" placeholder="todas" inputmode="numeric" aria-describedby="pages-hint">
+          </div>
+          <div class="field">
+            <label for="password">Senha</label>
+            <input type="password" id="password" placeholder="se houver" autocomplete="off">
+          </div>
+        </div>
+        <p class="hint" id="pages-hint">Ex.: <code>1-3,5,10-</code></p>
+        <label class="check"><input type="checkbox" id="opt-tables" checked><span>Tabelas estruturadas<small>com e sem bordas</small></span></label>
+        <label class="check"><input type="checkbox" id="opt-formulas" checked><span>Fórmulas em LaTeX<small>sobrescrito, subscrito e símbolos</small></span></label>
+        <label class="check"><input type="checkbox" id="opt-images" checked><span>Recortar imagens<small>figuras, tabelas e fórmulas em PNG</small></span></label>
+      </fieldset>
+
+      <button class="btn btn-primary" id="run-btn" type="button" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>
+        Extrair
+      </button>
+      <div class="progress" id="progress" aria-hidden="true"><div></div></div>
+
+      <p class="privacy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span id="privacy-text">No modo navegador o arquivo não é enviado a lugar nenhum.</span>
+      </p>
+    </aside>
+
+    <section class="panel main" aria-label="Resultado">
+      <div class="toolbar">
+        <div class="tabs" role="tablist" aria-label="Visualizações">
+          <button role="tab" aria-selected="true" data-view="pages">Páginas</button>
+          <button role="tab" aria-selected="false" data-view="markdown">Markdown</button>
+          <button role="tab" aria-selected="false" data-view="tables">Tabelas<span class="count" id="n-tables">0</span></button>
+          <button role="tab" aria-selected="false" data-view="images">Imagens<span class="count" id="n-images">0</span></button>
+          <button role="tab" aria-selected="false" data-view="text">Texto</button>
+          <button role="tab" aria-selected="false" data-view="json">JSON</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn small-btn" id="copy-btn" type="button" disabled>Copiar Markdown</button>
+        <div class="menu" id="export-menu">
+          <button class="btn btn-primary small-btn" id="export-btn" type="button" aria-haspopup="true" aria-expanded="false" disabled>
+            Exportar
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="menu-list" role="menu" id="export-list"></div>
+        </div>
+      </div>
+      <div class="stats" id="stats" hidden></div>
+
+      <div class="view" id="view-pages" role="tabpanel">
+        <div class="empty" id="empty">
+          <div>
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <h2>Escolha um PDF para ver a estrutura</h2>
+            <p>Cada bloco aparece destacado na página, no lugar exato onde está.</p>
+            <ul>
+              <li>Ordem de leitura correta em documentos de duas ou três colunas</li>
+              <li>Tabelas com e sem bordas viram linhas e colunas (CSV, Excel)</li>
+              <li>Fórmulas com sobrescrito, subscrito e símbolos viram LaTeX</li>
+              <li>Figuras, tabelas e fórmulas também saem como imagem recortada</li>
+              <li>Cabeçalhos, rodapés e números de página são separados do conteúdo</li>
+            </ul>
+          </div>
+        </div>
+        <div class="viewer-grid" id="viewer" hidden>
+          <div>
+            <div class="legend" id="legend"></div>
+            <div class="pages" id="pages-list"></div>
+          </div>
+          <aside class="panel inspector" id="inspector" aria-live="polite">
+            <h3>Clique num bloco</h3>
+            <p class="hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>
+          </aside>
+        </div>
+      </div>
+      <div class="view" id="view-markdown" role="tabpanel" hidden>
+        <div class="md-actions">
+          <div class="segmented" style="width:220px" role="radiogroup" aria-label="Modo do Markdown">
+            <label><input type="radio" name="mdmode" value="rendered" checked><span>Visualizar</span></label>
+            <label><input type="radio" name="mdmode" value="source"><span>Código</span></label>
+          </div>
+        </div>
+        <article class="prose" id="md-rendered"></article>
+        <pre class="code-view" id="md-source" hidden></pre>
+      </div>
+      <div class="view" id="view-tables" role="tabpanel" hidden><div class="cards" id="tables-list"></div></div>
+      <div class="view" id="view-images" role="tabpanel" hidden><div class="gallery" id="gallery"></div></div>
+      <div class="view" id="view-text" role="tabpanel" hidden><pre class="code-view" id="text-out"></pre></div>
+      <div class="view" id="view-json" role="tabpanel" hidden><pre class="code-view" id="json-out"></pre></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <details>
+      <summary>Como funciona e como usar em código</summary>
+      <div class="features">
+        <div>
+          <h3>No navegador</h3>
+          <p>O motor de layout roda em JavaScript sobre o pdf.js: agrupa glifos em linhas, detecta colunas com um XY-cut que não confunde coluna de texto com coluna de tabela, reconstrói tabelas pelas réguas ou pelo alinhamento e transforma sobrescritos em LaTeX.</p>
+        </div>
+        <div>
+          <h3>No servidor</h3>
+          <p>O mesmo algoritmo roda em Python sobre o PDFium, em paralelo com o Apache Tika, que adiciona metadados, títulos marcados do PDF, OCR com Tesseract e mais de mil formatos (DOCX, PPTX, XLSX, EPUB…).</p>
+        </div>
+        <div>
+          <h3>Em Python</h3>
+          <p><code>pip install pdf-text-api</code><br><code>from pdf_text_api import extract</code><br><code>extract("a.pdf", images=True).to_markdown()</code></p>
+        </div>
+        <div>
+          <h3>Via API</h3>
+          <p><code>curl -F file=@a.pdf "localhost:8000/v1/extract?format=markdown"</code></p>
+        </div>
+      </div>
+    </details>
+    <p>Open source (MIT) · <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor">github.com/beatrizalmeidaf/pdf-text-extractor</a></p>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
