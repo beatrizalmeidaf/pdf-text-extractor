@@ -197,9 +197,11 @@ class Span:
 
 def _mode_size(chars: list[Char]) -> float:
     """Most common glyph size (to the half point)."""
+    sizes = [round(c.size * 2) / 2 for c in chars]
+    if min(sizes) == max(sizes):  # one size, the usual case
+        return sizes[0]
     counts: dict[float, int] = {}
-    for c in chars:
-        k = round(c.size * 2) / 2
+    for k in sizes:
         counts[k] = counts.get(k, 0) + 1
     return max(counts, key=counts.__getitem__)
 
@@ -215,15 +217,17 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
         tally = Counter(sizes)
         shared = [s for s, n in tally.items() if n >= max(2, len(chars) * 0.2)]
     main = max([main, *shared])
-    normal = [c.y1 for c in chars if abs(c.size - main) <= main * 0.05] or [c.y1 for c in chars]
-    base = _median(normal)
     # Letter-spaced text ("T Í T U L O") has wide gaps between every glyph: a word gap
     # must be wide *relative to the usual gap of this run*, not just in absolute terms.
     gaps = [b.x0 - a.x1 for a, b in zip(chars, chars[1:], strict=False) if b.space < 2]
     tracking = max(0.0, _median(gaps)) if len(gaps) >= 3 else 0.0
     word_gap = tracking + max(main, 1) * WORD_GAP_EM
     kinds = []
-    for ch in chars if min(c.size for c in chars) < main * 0.96 else ():
+    scripts = min(c.size for c in chars) < main * 0.96  # a glyph small enough to be one
+    if scripts:
+        normal = [c.y1 for c in chars if abs(c.size - main) <= main * 0.05]
+        base = _median(normal or [c.y1 for c in chars])
+    for ch in chars if scripts else ():
         kind = "n"
         if ch.size < main * 0.86:
             if base - ch.y1 > main * 0.2:
@@ -236,8 +240,18 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
             elif ch.y1 - base > main * 0.15:
                 kind = "sub"
         kinds.append(kind)
-    if not kinds:
-        kinds = ["n"] * len(chars)
+    if not kinds:  # nothing raised or lowered, the usual case: one run of text
+        parts = [chars[0].c]
+        prev = chars[0]
+        for ch in chars[1:]:
+            gap = ch.x0 - prev.x1
+            if (ch.space == 2 or gap > word_gap or (ch.space and gap > word_gap * 0.6)) and not (
+                ch.c == "," and ch.space < 2  # (see below)
+            ):
+                parts.append(" ")
+            parts.append(ch.c)
+            prev = ch
+        return [("n", "".join(parts))]
     # A glyph of another font inside an index ("(ℓ)" with a script l) follows its neighbours.
     for k in range(1, len(chars) - 1) if "sup" in kinds or "sub" in kinds else ():
         off_line = abs(chars[k].y1 - base) > main * 0.08  # ("O" in "H2O2" stays on the line)
@@ -487,49 +501,52 @@ _BOLD_NAME = re.compile(r"bold|black|heavy|semibold|demi|medi(ital)?$|^cmbx|^cmb
 _ITALIC_NAME = re.compile(r"italic|oblique|ital$|^cmti|^cmsl")
 
 
-def _font_info(obj, cache: dict | None = None) -> FontInfo:
-    font = pr.FPDFTextObj_GetFont(obj) if obj else None
-    key = ctypes.cast(font, ctypes.c_void_p).value if font else 0
-    if cache is not None and key in cache:
-        name, weight, flags = cache[key]
-    else:
+def _font_info(obj: int, cache: dict) -> FontInfo:
+    """What a text object (given by its address; 0 = none) says about its glyphs. What comes
+    from the font alone is read once per font: a page has thousands of text objects and a
+    handful of fonts."""
+    font = (_obj_font(obj) or 0) if obj else 0
+    known = cache.get(font)
+    if known is None:
         name, weight, flags = "", -1, 0
         if font:
-            size = pr.FPDFFont_GetBaseFontName(font, None, 0)
+            handle = ctypes.cast(font, pr.FPDF_FONT)
+            size = pr.FPDFFont_GetBaseFontName(handle, None, 0)
             if size > 0:
                 buf = ctypes.create_string_buffer(size)
-                pr.FPDFFont_GetBaseFontName(font, buf, size)
+                pr.FPDFFont_GetBaseFontName(handle, buf, size)
                 name = buf.value.decode("utf-8", "replace")
-            weight = pr.FPDFFont_GetWeight(font)
-            flags = pr.FPDFFont_GetFlags(font)
-        if cache is not None:
-            cache[key] = (name, weight, flags)
-    low = name.lower().split("+")[-1]  # drop subset prefix "ABCDEF+"
+            weight = pr.FPDFFont_GetWeight(handle)
+            flags = pr.FPDFFont_GetFlags(handle)
+        low = name.lower().split("+")[-1]  # drop subset prefix "ABCDEF+"
+        known = cache[font] = (
+            name,
+            weight >= 600 or bool(_BOLD_NAME.search(low)),
+            bool(flags & 64) or bool(_ITALIC_NAME.search(low)),
+            is_math_font(low),
+            bool(flags & 1)
+            or any(k in low for k in ("mono", "courier", "consol", "menlo", "inconsolata")),
+        )
+    name, bold, italic, maths, mono = known
     rotated = white = False
     pt = 0.0
     if obj:
         m = pr.FS_MATRIX()
-        if pr.FPDFPageObj_GetMatrix(obj, ctypes.byref(m)):
+        if _obj_matrix(obj, ctypes.addressof(m)):
             rotated = abs(m.b) > abs(m.a) * 0.2 or abs(m.c) > abs(m.d) * 0.2
             size = ctypes.c_float()
-            if pr.FPDFTextObj_GetFontSize(obj, ctypes.byref(size)):
+            if _obj_font_size(obj, ctypes.addressof(size)):
                 pt = size.value * math.sqrt(abs(m.a * m.d - m.b * m.c))
-        mode = pr.FPDFTextObj_GetTextRenderMode(obj)
+        mode = _obj_render_mode(obj)
         if mode in (pr.FPDF_TEXTRENDERMODE_FILL, pr.FPDF_TEXTRENDERMODE_FILL_CLIP):
-            r, g_, b, a = (ctypes.c_uint() for _ in range(4))
-            if pr.FPDFPageObj_GetFillColor(obj, *(ctypes.byref(v) for v in (r, g_, b, a))):
-                white = a.value > 0 and min(r.value, g_.value, b.value) >= 250
+            rgba = (ctypes.c_uint * 4)()
+            at = ctypes.addressof(rgba)
+            if _obj_fill_color(obj, at, at + 4, at + 8, at + 12):
+                white = rgba[3] > 0 and min(rgba[0], rgba[1], rgba[2]) >= 250
     return FontInfo(
-        name=name,
-        bold=weight >= 600 or bool(_BOLD_NAME.search(low)),
-        italic=bool(flags & 64) or bool(_ITALIC_NAME.search(low)),
-        math=is_math_font(low),
-        mono=bool(flags & 1)
-        or any(k in low for k in ("mono", "courier", "consol", "menlo", "inconsolata")),
-        rotated=rotated,
-        white=white,
-        pt=pt,
-    )
+        name=name, bold=bold, italic=italic, math=maths, mono=mono,
+        rotated=rotated, white=white, pt=pt,
+    )  # fmt: skip
 
 
 def _fast(fn, restype, *argtypes):
@@ -547,6 +564,11 @@ _get_unicode = _fast(pr.FPDFText_GetUnicode, ctypes.c_uint, _VP, _INT)
 _get_textobj = _fast(pr.FPDFText_GetTextObject, _VP, _VP, _INT)
 _get_loose_box = _fast(pr.FPDFText_GetLooseCharBox, _INT, _VP, _INT, _VP)
 _is_generated = _fast(pr.FPDFText_IsGenerated, _INT, _VP, _INT)
+_obj_font = _fast(pr.FPDFTextObj_GetFont, _VP, _VP)
+_obj_matrix = _fast(pr.FPDFPageObj_GetMatrix, _INT, _VP, _VP)
+_obj_font_size = _fast(pr.FPDFTextObj_GetFontSize, _INT, _VP, _VP)
+_obj_render_mode = _fast(pr.FPDFTextObj_GetTextRenderMode, _INT, _VP)
+_obj_fill_color = _fast(pr.FPDFPageObj_GetFillColor, _INT, _VP, _VP, _VP, _VP, _VP)
 _HYPHEN_MARKS = (2, 0xFFFE)  # PDFium's marker for an end-of-line hyphenation
 
 
@@ -575,8 +597,7 @@ def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float], te
         fi = font_index.get(key)
         if fi is None:
             fi = font_index[key] = len(fonts)
-            obj = ctypes.cast(key, pr.FPDF_PAGEOBJECT) if key else None
-            info = _font_info(obj, font_cache)
+            info = _font_info(key, font_cache)
             info.tex = tex_encoding(info.name)
             fonts.append(info)
         return fi
@@ -593,7 +614,8 @@ def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float], te
         high = 0
         fi = None
         mapped = None
-        if tex and u < 0x80 and not _is_generated(tp, i):
+        if tex and u < 0x80:
+            # (A generated character has no text object, hence no TeX font: no need to ask.)
             fi = font_of(i)
             if fonts[fi].tex:
                 mapped = tex_char(u, fonts[fi].tex)
@@ -613,7 +635,12 @@ def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float], te
             continue  # wide accents, pieces of horizontal braces
         if fi is None:
             fi = font_of(i)
-        c = mapped or ("-" if u in _HYPHEN_MARKS else normalize_char(chr(u), fonts[fi].name))
+        if mapped:
+            c = mapped
+        elif 0x21 <= u <= 0x7E:
+            c = chr(u)  # plain ASCII: nothing to normalise
+        else:
+            c = "-" if u in _HYPHEN_MARKS else normalize_char(chr(u), fonts[fi].name)
         if negate:
             c, negate = NEGATED.get(c, c), False
         if not c or c.isspace():
@@ -1965,16 +1992,18 @@ def _right_edges(lines: list[Line]) -> dict[int, float]:
     # Where columns start: an x that three or more lines begin at.
     starts = Counter(round(ln.x0 / 2) for ln in lines)
     col_starts = sorted(k * 2.0 for k, n in starts.items() if n >= 3)
-    for a in lines:
+    boxes = [(ln.x0, ln.y0, ln.x1, ln.y1) for ln in lines]
+    for a, (ax0, ay0, ax1, ay1) in zip(lines, boxes, strict=True):
         size = max(a.size, 4)
-        edge = a.x1
-        beside = [x for x in col_starts if x >= a.x1 - 1]
-        for b in lines:
+        edge = ax1
+        beside = [x for x in col_starts if x >= ax1 - 1]
+        half_width, half_height, reach = (ax1 - ax0) * 0.5, (ay1 - ay0) * 0.5, ax0 + size * 3
+        for bx0, by0, bx1, by1 in boxes:
             # A centred title over two columns starts well right of a left-column line.
-            if min(a.x1, b.x1) - max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5 and b.x0 <= a.x0 + size * 3:
-                edge = max(edge, b.x1)
-            elif b.x0 >= a.x1 - 1 and min(a.y1, b.y1) - max(a.y0, b.y0) > (a.y1 - a.y0) * 0.5:
-                beside.append(b.x0)  # the next column, on the same row
+            if min(ax1, bx1) - max(ax0, bx0) > half_width and bx0 <= reach:
+                edge = max(edge, bx1)
+            elif bx0 >= ax1 - 1 and min(ay1, by1) - max(ay0, by0) > half_height:
+                beside.append(bx0)  # the next column, on the same row
         if beside:
             edge = min(edge, max(a.x1, min(beside) - size))
         out[id(a)] = edge
