@@ -7,6 +7,9 @@ import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+import { areaOf, columns, gutters as pageGutters } from "./columns.js";
+import { NEGATED, NOT, isTexProducer, texChar, texEncoding, texGlyph } from "./texfonts.js";
+
 export { pdfjsLib };
 
 export const SCHEMA = "pdf-text-api/document@1";
@@ -160,7 +163,8 @@ function segmentsOf(chars, main) {
       else if (ch.y1 - base > main * 0.08) kind = "sub";
     }
     const gap = prev ? ch.x0 - prev.x1 : 0;
-    const space = prev !== null && (ch.space === 2 || gap > wordGap || (ch.space && gap > wordGap * 0.6));
+    let space = prev !== null && (ch.space === 2 || gap > wordGap || (ch.space && gap > wordGap * 0.6));
+    if (ch.c === "," && ch.space < 2) space = false; // a gap left by an inline icon ("Wu [iD], Fellow")
     if (out.length && out[out.length - 1][0] === kind) out[out.length - 1][1] += (space ? " " : "") + ch.c;
     else {
       if (space && out.length) out[out.length - 1][1] += " ";
@@ -219,7 +223,31 @@ class Span {
   get height() { return this.y1 - this.y0; }
 }
 
+// A drop cap (a big "T" spanning the first lines of a paragraph) would fuse the lines
+// beside it into one. Put it on its first line, right before the word it starts.
+function dropCaps(chars) {
+  if (chars.length < 20) return chars;
+  const typical = median(chars.map(charSize));
+  let out = chars;
+  for (let i = 0; i < chars.length - 1; i++) {
+    const c = chars[i], n = chars[i + 1];
+    if (charSize(c) < typical * 2.2 || !/\p{L}/u.test(c.c)) continue;
+    const ncy = (n.y0 + n.y1) / 2;
+    if (charSize(n) > typical * 1.5 || !(c.y0 <= ncy && ncy <= c.y1) || !(n.x0 - c.x1 >= -1 && n.x0 - c.x1 <= typical * 1.5)) continue;
+    const beside = chars.slice(i + 2, i + 600).some((o) => {
+      const cy = (o.y0 + o.y1) / 2;
+      return charSize(o) <= typical * 1.5 && n.y1 < cy && cy < c.y1 && c.x1 - 1 <= o.x0 && o.x0 <= c.x1 + typical * 1.5;
+    });
+    if (!beside) continue;
+    if (out === chars) out = [...chars];
+    const w = charSize(n) * 0.7;
+    out[i] = { ...c, x0: n.x0 - w - 0.1, y0: n.y0, x1: n.x0 - 0.1, y1: n.y1 };
+  }
+  return out;
+}
+
 function buildSpans(chars, fonts) {
+  chars = dropCaps(chars);
   const raw = [];
   let cur = [];
   for (const ch of chars) {
@@ -238,9 +266,22 @@ function buildSpans(chars, fonts) {
   if (cur.length) raw.push(cur);
 
   const lines = mergeFragments(raw);
+  // The page's column gutters, from its runs of words: a gap that swallows a whole gutter
+  // joins two columns (an equation number drawn right before the next column's line).
+  const runs = [];
+  for (const line of lines) {
+    const size = Math.max(median(line.map(charSize)), 4);
+    let from = 0;
+    for (let i = 1; i <= line.length; i++) {
+      if (i < line.length && line[i].x0 - line[i - 1].x1 <= size * 0.5) continue;
+      const run = line.slice(from, i);
+      runs.push([run[0].x0, Math.min(...run.map((c) => c.y0)), Math.max(...run.map((c) => c.x1)), Math.max(...run.map((c) => c.y1))]);
+      from = i;
+    }
+  }
+  const gaps = pageGutters(runs);
   const spans = [];
   for (let line of lines) {
-    line.sort((a, b) => a.x0 - b.x0);
     line = composeAccents(line);
     const size = Math.max(median(line.map(charSize)), 4);
     const wordGaps = [];
@@ -249,12 +290,17 @@ function buildSpans(chars, fonts) {
       if (line[i].space || g > size * WORD_GAP_EM) wordGaps.push(g);
     }
     const typical = wordGaps.length >= 3 ? median(wordGaps) : 0;
+    // The line sets its word gaps with real space glyphs: a gap this wide without one is a
+    // jump of the pen — an equation number followed by the next column's line.
+    const spaced = line.filter((c) => c.space === 2).length >= 3;
     let piece = [line[0]];
     for (let i = 1; i < line.length; i++) {
       const prev = line[i - 1], ch = line[i];
       const gap = ch.x0 - prev.x1;
       let wide = gap > size * SPAN_GAP_EM && (gap > typical * 2.2 || gap > size * JUSTIFIED_GAP_EM);
       if (ch.space === 2 && gap < size * JUSTIFIED_GAP_EM) wide = false;
+      if (spaced && ch.space !== 2 && gap > size * SPAN_GAP_EM) wide = true;
+      if (gaps.some(([g0, g1]) => prev.x1 <= g0 + 2.5 && ch.x0 >= g1 - 2.5)) wide = true;
       if (wide) {
         spans.push(new Span(piece, fonts));
         piece = [];
@@ -263,7 +309,7 @@ function buildSpans(chars, fonts) {
     }
     spans.push(new Span(piece, fonts));
   }
-  return joinMarkers(spans);
+  return joinMarkers(spans, gaps);
 }
 
 // Accents drawn as their own glyph (TeX OT1 fonts): "Computa¸ca˜o" -> "Computação".
@@ -308,12 +354,42 @@ function composeAccents(line) {
   return out;
 }
 
+// Glyphs of one visual line, left to right. A limit set under or over an operator ("max"
+// with its subscript below) overlaps it sideways: it goes right after the glyphs it is
+// stacked on, as one piece, instead of being shuffled into them.
+function orderLine(fragments) {
+  if (fragments.length === 1) return [...fragments[0]].sort((a, b) => a.x0 - b.x0);
+  const sizes = fragments.map((f) => median(f.map(charSize)));
+  const main = Math.max(...sizes);
+  const base = fragments.filter((_, i) => sizes[i] > main * 0.85).flat();
+  const keyed = [];
+  fragments.forEach((f, i) => {
+    let anchor = null;
+    if (sizes[i] <= main * 0.85 && base.length) {
+      const x0 = Math.min(...f.map((c) => c.x0)), x1 = Math.max(...f.map((c) => c.x1));
+      const y0 = Math.min(...f.map((c) => c.y0)), y1 = Math.max(...f.map((c) => c.y1));
+      const stacked = base.filter((c) => {
+        const cx = (c.x0 + c.x1) / 2;
+        return x0 <= cx && cx <= x1 && Math.min(c.y1, y1) - Math.max(c.y0, y0) < (y1 - y0) * 0.3;
+      });
+      if (stacked.length) anchor = Math.max(...stacked.map((c) => c.x1)) - 0.01;
+    }
+    for (const c of f) keyed.push([anchor === null ? [c.x0, 0, 0] : [anchor, 1, c.x0], c]);
+  });
+  keyed.sort(([a], [b]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  return keyed.map(([, c]) => c);
+}
+
 function mergeFragments(lines) {
-  if (lines.length < 2) return lines;
+  if (lines.length < 2) return lines.map((ln) => orderLine([ln]));
   const boxes = lines.map((ln) => [
     Math.min(...ln.map((c) => c.x0)), Math.min(...ln.map((c) => c.y0)),
     Math.max(...ln.map((c) => c.x1)), Math.max(...ln.map((c) => c.y1)),
   ]);
+  const sizes = lines.map((ln) => median(ln.map(charSize)));
+  // Where the text of each fragment sits, whatever tall glyph (a big operator, a limit)
+  // stretches its box: two lines of a formula-heavy paragraph have overlapping boxes.
+  const mids = lines.map((ln) => median(ln.map((c) => (c.y0 + c.y1) / 2)));
   const order = lines.map((_, i) => i).sort((a, b) => boxes[a][1] - boxes[b][1] || boxes[a][0] - boxes[b][0]);
   const merged = [];
   const out = new Map();
@@ -326,20 +402,26 @@ function mergeFragments(lines) {
       const h = Math.min(hi, hj);
       const overlap = Math.min(bi[3], bj[3]) - Math.max(bi[1], bj[1]);
       const touching = bi[0] <= bj[2] + h * SPAN_GAP_EM && bj[0] <= bi[2] + h * SPAN_GAP_EM;
-      if (overlap >= h * 0.7 && touching) { target = j; break; }
+      const level = Math.abs(mids[i] - mids[j]) <= Math.min(sizes[i], sizes[j]) * 0.35;
+      if (overlap >= h * 0.7 && touching && level) { target = j; break; }
+      // A superscript/subscript drawn on its own: smaller glyphs (or a short piece), partly
+      // overlapping, glued to the bigger fragment. Two full lines of the same text, one of
+      // them taller because of its own scripts, are not that.
       const glued = bi[0] <= bj[2] + h * 0.4 && bj[0] <= bi[2] + h * 0.4;
-      if (h <= Math.max(hi, hj) * 0.8 && overlap >= h * 0.2 && glued) { target = j; break; }
+      const small = hi <= hj ? i : j;
+      const script = Math.min(sizes[i], sizes[j]) <= Math.max(sizes[i], sizes[j]) * 0.85 || lines[small].length <= 6;
+      if (h <= Math.max(hi, hj) * 0.8 && overlap >= h * 0.2 && glued && script) { target = j; break; }
     }
     if (target === null) {
       merged.push(i);
-      out.set(i, [...lines[i]]);
+      out.set(i, [lines[i]]);
     } else {
-      out.get(target).push(...lines[i]);
+      out.get(target).push(lines[i]);
       const bj = boxes[target];
       boxes[target] = [Math.min(bj[0], bi[0]), Math.min(bj[1], bi[1]), Math.max(bj[2], bi[2]), Math.max(bj[3], bi[3])];
     }
   }
-  return merged.map((i) => out.get(i));
+  return merged.map((i) => orderLine(out.get(i)));
 }
 
 const isMarker = (text) => {
@@ -347,14 +429,16 @@ const isMarker = (text) => {
   return (t.length === 1 && BULLETS.has(t)) || new RegExp(ENUM.source + "$").test(t);
 };
 
-function joinMarkers(spans) {
+// (An equation number at the end of a column is not the marker of the next column's line.)
+function joinMarkers(spans, gaps = []) {
   const out = [];
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i];
     if (i + 1 < spans.length && isMarker(s.text)) {
       const nxt = spans[i + 1];
       const sameRow = Math.min(s.y1, nxt.y1) - Math.max(s.y0, nxt.y0) > Math.min(s.height, nxt.height) * 0.4;
-      if (sameRow && nxt.x0 - s.x1 >= 0 && nxt.x0 - s.x1 < Math.max(s.size, 6) * 4) {
+      const overGutter = gaps.some(([g0, g1]) => s.x1 <= g0 + 2.5 && nxt.x0 >= g1 - 2.5);
+      if (sameRow && !overGutter && nxt.x0 - s.x1 >= 0 && nxt.x0 - s.x1 < Math.max(s.size, 6) * 4) {
         nxt.chars[0].space = 2;
         out.push(new Span([...s.chars, ...nxt.chars], s.fonts));
         i++;
@@ -415,11 +499,16 @@ function splitColumns(items, minGap) {
   const cols = [];
   let rest = items;
   const gs = gutters(items, minGap);
-  const rows = gs.length ? bandsOf(items).filter(tableRow) : [];
+  const rows = gs.length ? bandsOf(items).map((b) => (tableRow(b) ? b : null)) : [];
   for (const [g0, g1] of gs) {
     const left = rest.filter((a) => a.x1 <= g0 + 0.01);
     const right = rest.filter((a) => a.x0 >= g1 - 0.01);
-    const cutsTable = rows.some((row) => row.some((a) => a.x1 <= g0 + 0.01) && row.some((a) => a.x0 >= g1 - 0.01));
+    // A table has its rows one after the other. One row of short pieces over the gutter
+    // (an equation beside a short line of the other column) is not a table.
+    const across = rows.map((row) => !!row && row.some((a) => a.x1 <= g0 + 0.01) && row.some((a) => a.x0 >= g1 - 0.01));
+    let run = 0, longest = 0;
+    for (const hit of across) { run = hit ? run + 1 : 0; longest = Math.max(longest, run); }
+    const cutsTable = longest >= 3 || (across.length > 0 && across.every(Boolean));
     if (left.length && right.length && !cutsTable && textLike(left) && textLike(right)) {
       cols.push(left);
       rest = right;
@@ -848,7 +937,8 @@ class Line {
     this.y0 = Math.min(...spans.map((s) => s.y0));
     this.x1 = Math.max(...spans.map((s) => s.x1));
     this.y1 = Math.max(...spans.map((s) => s.y1));
-    this.text = spans.map((s) => s.text.trim()).filter(Boolean).join(" ");
+    // (A span that starts with a comma follows an inline icon: "Wu [iD], Fellow".)
+    this.text = spans.map((s) => s.text.trim()).filter(Boolean).join(" ").replaceAll(" ,", ",");
     this.size = spans.reduce((a, b) => (b.chars.length > a.chars.length ? b : a)).size;
     // By glyph: a line with a few words in bold is not a bold line.
     const all = spans.flatMap((s) => s.chars.map((c) => s.fonts[c.font].bold));
@@ -893,9 +983,20 @@ const hardBreak = (prev, nxt, edges) =>
 // Right edge of each line's text column: the furthest any line reaching over it goes.
 function rightEdges(lines) {
   const out = new Map();
+  // Where columns start: an x that three or more lines begin at.
+  const starts = new Map();
+  for (const ln of lines) { const k = Math.round(ln.x0 / 2); starts.set(k, (starts.get(k) || 0) + 1); }
+  const colStarts = [...starts].filter(([, n]) => n >= 3).map(([k]) => k * 2);
   for (const a of lines) {
+    const size = Math.max(a.size, 4);
     let edge = a.x1;
-    for (const b of lines) if (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5) edge = Math.max(edge, b.x1);
+    const beside = colStarts.filter((x) => x >= a.x1 - 1);
+    for (const b of lines) {
+      // A centred title over two columns starts well right of a left-column line.
+      if (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5 && b.x0 <= a.x0 + size * 3) edge = Math.max(edge, b.x1);
+      else if (b.x0 >= a.x1 - 1 && Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > (a.y1 - a.y0) * 0.5) beside.push(b.x0); // next column, same row
+    }
+    if (beside.length) edge = Math.min(edge, Math.max(a.x1, Math.min(...beside) - size));
     out.set(a, edge);
   }
   return out;
@@ -948,14 +1049,18 @@ function runsOf(group, edges) {
       else last.text += hardBreak(prev, ln, edges) ? NEWLINE : " ";
     }
     ln.spans.forEach((span, k) => {
-      if (k && runs.length) runs[runs.length - 1].text += " ";
+      if (k && runs.length && !span.text.trimStart().startsWith(",")) runs[runs.length - 1].text += " ";
       const fonts = span.fonts;
       let piece = [];
+      let prior = null; // the glyph before this piece, on the same span
       const flushPiece = () => {
         if (!piece.length) return;
         const f = fonts[piece[0].font];
         const last = runs[runs.length - 1];
-        const lead = piece[0].space && last && !/[ \n]$/.test(last.text) ? " " : "";
+        const gap = prior ? piece[0].x0 - prior.x1 : 0;
+        const spaced = (piece[0].space || gap > Math.max(span.size, 1) * WORD_GAP_EM) && (piece[0].c !== "," || piece[0].space === 2);
+        prior = piece[piece.length - 1];
+        const lead = spaced && last &&!/[ \n]$/.test(last.text) ? " " : "";
         segmentsOf(piece, span.size).forEach(([kind, text], i) =>
           add((i === 0 ? lead : "") + text, !!f.bold, !!f.italic, kind === "n" ? null : kind === "sup" ? "super" : "sub"));
         piece = [];
@@ -1088,9 +1193,11 @@ function linesToBlocks(lines) {
 function layoutFormat(page) {
   const text = page.blocks.filter((b) => b.line_boxes && !FURNITURE.has(b.type));
   if (!text.length) return;
-  const left = Math.min(...text.map((b) => b.bbox[0])), right = Math.max(...text.map((b) => b.bbox[2]));
-  const width = Math.max(right - left, 1), mid = (left + right) / 2, tol = Math.max(3, width * 0.012);
+  // Against the block's own column. (A grid of pictures has gaps that are not gutters.)
+  const cols = columns(page.blocks.filter((b) => b.bbox && !FURNITURE.has(b.type) && b.type !== "figure").map((b) => b.bbox));
   for (const b of text) {
+    const [left, right] = areaOf(b.bbox, cols);
+    const width = Math.max(right - left, 1), mid = (left + right) / 2, tol = Math.max(3, width * 0.012);
     const boxes = b.line_boxes;
     const x0s = boxes.map((l) => l[0]), x1s = boxes.map((l) => l[2]);
     const centred = x0s.every((a, i) => Math.abs((a + x1s[i]) / 2 - mid) <= tol * 1.5);
@@ -1108,6 +1215,7 @@ function layoutFormat(page) {
       const pitch = median(boxes.slice(1).map((l, k) => l[3] - boxes[k][3]));
       const multiple = pitch / (b.pt * 1.15);
       if (multiple > 1.2) fmt.line_spacing = Math.round(multiple * 100) / 100;
+      if (b.pt * 0.9 <= pitch && pitch <= b.pt * 3) fmt.leading = Math.round(pitch * 10) / 10;
     }
     b.format = fmt;
   }
@@ -1144,7 +1252,8 @@ async function fontInfo(page, fontName, style) {
 // position (not spread evenly over a text item), real font size, and fill colour — so white
 // text on white paper can be told apart from what the reader sees. Mirrors read_chars() in
 // layout.py, which gets the same from PDFium.
-function readGlyphs(page, viewport, ops) {
+// `tex`: the PDF was written by TeX, so raw codes of its math fonts can be decoded.
+function readGlyphs(page, viewport, ops, tex = false) {
   const O = pdfjsLib.OPS;
   const fonts = [];
   const fontIndex = new Map();
@@ -1154,6 +1263,7 @@ function readGlyphs(page, viewport, ops) {
   const stack = [];
   let tm = IDENTITY.slice(), tlm = IDENTITY.slice();
   let space = 0, newline = false;
+  let negate = false; // TeX's "not" slash was seen: it strikes the next glyph ("=" -> "≠")
 
   const font = () => {
     let fi = fontIndex.get(st.key);
@@ -1170,6 +1280,7 @@ function readGlyphs(page, viewport, ops) {
         italic: !!f?.italic || /italic|oblique/.test(low),
         math: isMathFont(low),
         mono: /mono|courier|consol|menlo|inconsolata/.test(low),
+        tex: texEncoding(name),
       });
     }
     return fi;
@@ -1188,14 +1299,27 @@ function readGlyphs(page, viewport, ops) {
     for (const it of items) {
       if (typeof it === "number") { // TJ spacing, thousandths of an em
         tm = mul(tm, [1, 0, 0, 1, (-it / 1000) * st.size * st.hs, 0]);
+        // TeX sets no space glyphs: a word gap is a jump of the pen (kerning is far smaller).
+        if (it < -120 && !space) space = 1;
         continue;
       }
       if (!it) continue;
       if (Array.isArray(it)) { show(it); continue; }
       const w0 = (it.width || 0) * fm[0];
       const trm = mul(ctm, mul(tm, [st.size * st.hs, 0, 0, st.size, 0, st.rise]));
-      const uni = it.unicode || "";
-      if (it.isSpace || !uni.trim()) {
+      let uni = it.unicode || "";
+      // A math glyph pdf.js could not name comes through as its own code: recover the
+      // symbol from the glyph's PostScript name, or from TeX's font encoding.
+      const cp = uni.codePointAt(0) ?? -1;
+      let symbol = texGlyph(f?.differences?.[it.originalCharCode]);
+      if (symbol === undefined && tex && fonts[fi].tex && uni.length === 1 && cp === it.originalCharCode) symbol = texChar(cp, fonts[fi].tex);
+      if (symbol === undefined && cp >= 0 && cp < 32 && cp !== 9 && cp !== 10 && cp !== 13 && uni.length === 1) symbol = ""; // no Unicode value
+      if (symbol === NOT) { negate = true; symbol = ""; }
+      else if (symbol) { uni = negate ? NEGATED[symbol] || symbol : symbol; negate = false; }
+      else if (symbol === undefined && negate && uni.trim()) { uni = NEGATED[uni] || uni; negate = false; }
+      if (symbol === "") {
+        // wide accents, pieces of horizontal braces: they only draw
+      } else if (!symbol && (it.isSpace || !uni.trim())) {
         space = 2;
       } else {
         const parts = [...uni].map((g) => normalizeChar(g, fonts[fi].name)).join("");
@@ -1438,7 +1562,7 @@ async function analyzePage(pdf, number, opts) {
   const width = viewport.width, height = viewport.height;
   const ops = await page.getOperatorList(); // also resolves the fonts
   const g = await readGraphics(page, viewport, width, height, ops);
-  let { chars, rotated, fonts } = readGlyphs(page, viewport, ops);
+  let { chars, rotated, fonts } = readGlyphs(page, viewport, ops, opts.tex);
   if (!chars.length && !rotated.length) {
     // No glyphs in the operator list (unusual fonts): fall back to pdf.js text items.
     ({ chars, rotated, fonts } = await readChars(page, viewport, await page.getTextContent()));
@@ -1503,7 +1627,7 @@ const FURNITURE = new Set(["header", "footer", "page_number"]);
 function markFurniture(pages) {
   const key = (b) => b.type === "figure"
     ? `fig:${b.bbox.map((v, i) => Math.round((i < 2 ? v : v - b.bbox[i - 2]) / 6)).join(",")}`
-    : signature(b.text);
+    : signature(b.text).replace(/^(# )+|( #)+$/g, ""); // "8836 IEEE TRANS…" = "IEEE TRANS…"
   const zone = (b, p) => {
     if (!b.bbox || !["paragraph", "heading", "list_item", "figure"].includes(b.type)) return null;
     const [x0, y0, x1, y1] = b.bbox;
@@ -1519,7 +1643,7 @@ function markFurniture(pages) {
     for (const b of p.blocks) { const z = zone(b, p); if (z) seen.add(z + "|" + key(b)); }
     for (const k of seen) counts.set(k, (counts.get(k) || 0) + 1);
   }
-  const need = Math.max(2, Math.ceil(pages.length * 0.5));
+  const need = Math.max(2, Math.ceil(pages.length * 0.3)); // running heads alternate on odd/even pages
   for (const p of pages)
     for (const b of p.blocks) {
       const z = zone(b, p);
@@ -1537,9 +1661,13 @@ function classifyHeadings(pages, body) {
     p.blocks.forEach((b, i) => {
       // A one-line "list item" set bold or bigger than the body is a numbered section heading.
       const neighbours = [p.blocks[i - 1], p.blocks[i + 1]].filter(Boolean).map((x) => x.type);
-      if (b.type === "list_item" && !neighbours.includes("list_item") && b.lines === 1 && b.marker &&
-          /^\d/.test(b.marker) && b.text.length <= 80 &&
-          ((b.font_size || body) >= body * 1.25 || (b.bold && !/\.$/.test(b.text.trimEnd())))) {
+      const romanCaps = () => { // "I. INTRODUCTION" in small caps
+        const l = [...b.text].filter((c) => /\p{L}/u.test(c));
+        return /^[IVX]{1,4}\.$/.test(b.marker) && l.length >= 4 && l.every((c) => c === c.toUpperCase() && c !== c.toLowerCase());
+      };
+      if (b.type === "list_item" && !neighbours.includes("list_item") && b.lines === 1 && b.marker && b.text.length <= 80 &&
+          (romanCaps() || (/^\d/.test(b.marker) &&
+            ((b.font_size || body) >= body * 1.25 || (b.bold && !/\.$/.test(b.text.trimEnd())))))) {
         b.text = `${b.marker} ${b.text}`;
         b.type = "paragraph";
         delete b.marker;
@@ -1657,7 +1785,8 @@ async function readMetadata(pdf) {
 export async function extractDocument(data, opts = {}) {
   const started = performance.now();
   const o = { tables: true, formulas: true, images: false, imageScale: 2, ...opts };
-  const task = pdfjsLib.getDocument({ data: new Uint8Array(data), password: o.password || undefined, isEvalSupported: false });
+  // fontExtraProperties: glyph names, to read math symbols that have no Unicode mapping.
+  const task = pdfjsLib.getDocument({ data: new Uint8Array(data), password: o.password || undefined, isEvalSupported: false, fontExtraProperties: true });
   let pdf;
   try {
     pdf = await task.promise;
@@ -1666,6 +1795,8 @@ export async function extractDocument(data, opts = {}) {
     throw Object.assign(new Error("Arquivo não é um PDF válido ou está corrompido."), { code: "invalid_pdf" });
   }
   const indices = parsePageSpec(o.pages, pdf.numPages);
+  const metadata = await readMetadata(pdf);
+  o.tex = isTexProducer(metadata.producer);
   const results = [];
   for (const [k, i] of indices.entries()) {
     results.push(await analyzePage(pdf, i + 1, o));
@@ -1706,7 +1837,7 @@ export async function extractDocument(data, opts = {}) {
     page_count: pdf.numPages,
     pages_extracted: pages.length,
     likely_scanned: results.length > 0 && lowText >= Math.max(1, Math.ceil(results.length * 0.5)),
-    metadata: await readMetadata(pdf),
+    metadata,
     elapsed_ms: Math.round(elapsed * 10) / 10,
     timings: { layout_ms: Math.round(layoutMs * 10) / 10, total_ms: Math.round(elapsed * 10) / 10 },
     warnings: [],
@@ -1716,5 +1847,5 @@ export async function extractDocument(data, opts = {}) {
 }
 
 export async function openPdf(data, password) {
-  return pdfjsLib.getDocument({ data: new Uint8Array(data), password: password || undefined, isEvalSupported: false }).promise;
+  return pdfjsLib.getDocument({ data: new Uint8Array(data), password: password || undefined, isEvalSupported: false, fontExtraProperties: true }).promise;
 }
