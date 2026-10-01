@@ -16,7 +16,9 @@ from .model import Document
 from .render import block_markdown, figure_words
 
 
-def chunk_document(doc: Document, *, document: str = "", max_chars: int = 1500) -> list[dict]:
+def chunk_document(
+    doc: Document, *, document: str = "", max_chars: int = 1500, math: str = "unicode"
+) -> list[dict]:
     chunks: list[dict] = []
     headings: list[tuple[int, str]] = []  # (level, text) of the section we are in
     parts: list[str] = []
@@ -58,7 +60,7 @@ def chunk_document(doc: Document, *, document: str = "", max_chars: int = 1500) 
                 headings.append((level, b.text.replace("\n", " ")))
             elif b.type == "table" and b.rows:
                 flush()
-                text = block_markdown(b, "none")
+                text = block_markdown(b, "none", math)
                 if b.caption:
                     text = f"{b.caption}\n\n{text}"
                 emit("table", text, [b.id], [page.number])
@@ -68,7 +70,7 @@ def chunk_document(doc: Document, *, document: str = "", max_chars: int = 1500) 
             if b.type == "figure":
                 text = "\n".join(figure_words(b.text))  # legend and axis titles, for search
             else:
-                text = block_markdown(b, "none")
+                text = block_markdown(b, "none", math)
             if not text.strip():
                 continue
             if size and size + len(text) > max_chars:
