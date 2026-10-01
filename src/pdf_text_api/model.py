@@ -72,6 +72,7 @@ class Block:
     indent: float | None = None
     first_line: float | None = None
     line_spacing: float | None = None
+    leading: float | None = None  # baseline-to-baseline distance, pt
     pt: float | None = None  # real font size in points
     font: str | None = None  # font family, e.g. "Times New Roman"
     tracking: float | None = None  # extra space between letters (letter-spaced titles), pt
@@ -96,7 +97,10 @@ class Block:
             if self.tracking:
                 style["tracking"] = round(self.tracking, 1)
             out["style"] = style
-        fmt = {k: getattr(self, k) for k in ("align", "indent", "first_line", "line_spacing")}
+        fmt = {
+            k: getattr(self, k)
+            for k in ("align", "indent", "first_line", "line_spacing", "leading")
+        }
         fmt = {k: (round(v, 1) if isinstance(v, float) else v) for k, v in fmt.items() if v}
         if fmt:
             out["format"] = fmt
