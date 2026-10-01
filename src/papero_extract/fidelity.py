@@ -38,6 +38,7 @@ ORDER_ERROR = 0.10  # share of block-to-block steps that go backwards
 GARBLED_ERROR, GARBLED_WARNING = 0.05, 0.005  # share of characters with no Unicode value
 
 _TOKEN = re.compile(r"[^\W_]+")
+_SCRIPTS = re.compile("([\u00b2\u00b3\u00b9\u2070-\u209f]+)")  # super- and subscript characters
 _TABLE_CAPTION = re.compile(r"^(tab(ela|le)?|quadro)\b", re.IGNORECASE)
 _FIGURE_CAPTION = re.compile(r"^(fig(ura|ure)?|gr[aá]fico|chart)\b", re.IGNORECASE)
 
@@ -130,7 +131,8 @@ def reference_text(
 
 def _fold(text: str) -> str:
     """Case, accents and ligatures out of the way: "ﬁ" = "fi", "´e" = "é" = "e"."""
-    text = unicodedata.normalize("NFKD", text)
+    # An exponent is a number of its own: "10⁹" is "10" and "9", as the PDF has them.
+    text = unicodedata.normalize("NFKD", _SCRIPTS.sub(r" \1 ", text))
     return "".join(c for c in text if not unicodedata.combining(c)).casefold()
 
 
@@ -148,8 +150,8 @@ def _coverage(reference: str, output: str) -> tuple[int, int]:
     out = _fold(output)
     have = Counter(_TOKEN.findall(out))
     # Without separators: a word hyphenated at a line end, or split by an accent drawn as
-    # its own glyph, is still there. Not for numbers: "30" is inside too many other things,
-    # and the cells of a table that was lost would all be "found".
+    # its own glyph, is still there — and so is "10⁹" read as "109". Not for short numbers:
+    # "30" is inside too many other things, and the cells of a lost table would all be "found".
     stream = "".join(_TOKEN.findall(out))
     matched = total = 0
     for token in _TOKEN.findall(_fold(reference)):
@@ -159,7 +161,7 @@ def _coverage(reference: str, output: str) -> tuple[int, int]:
         if have[token] > 0:
             have[token] -= 1
             matched += len(token)
-        elif not token.isdigit() and token in stream:
+        elif not (token.isdigit() and len(token) < 3) and token in stream:
             matched += len(token)
     return matched, total
 
