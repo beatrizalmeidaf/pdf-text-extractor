@@ -397,6 +397,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             True, description="fast: remover cabeçalhos/rodapés repetidos"
         ),
         dehyphenate: bool = Query(False, description="fast: juntar palavras hifenizadas"),
+        math_mode: Literal["unicode", "latex"] = Query(
+            "unicode",
+            alias="math",
+            description="markdown/text: 'latex' escreve a matemática do texto como $…$",
+        ),
     ):
         if state["inflight"] >= settings.job_limit:
             raise ApiError(
@@ -410,7 +415,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "mode": mode, "format": format, "pages": pages, "per_page": per_page,
                 "images": images, "image_scale": image_scale, "tables": tables,
                 "formulas": formulas, "ocr": ocr, "ocr_language": ocr_language, "clean": clean,
-                "remove_headers": remove_headers, "dehyphenate": dehyphenate,
+                "remove_headers": remove_headers, "dehyphenate": dehyphenate, "math": math_mode,
             }  # fmt: skip
             secret = hashlib.sha256((password or "").encode()).hexdigest()
             key = f"{digest}:{secret}:{json.dumps(params, sort_keys=True)}"
@@ -468,12 +473,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return _json(out), MEDIA["json"], headers
         if fmt == "markdown":
             return (
-                doc.to_markdown(images="embed" if p["images"] else "none").encode(),
+                doc.to_markdown(images="embed" if p["images"] else "none", math=p["math"]).encode(),
                 MEDIA[fmt],
                 headers,
             )
         if fmt == "text":
-            return doc.text.encode(), MEDIA[fmt], headers
+            return doc.to_text(math=p["math"]).encode(), MEDIA[fmt], headers
         if fmt == "html":
             return doc.to_html(images="embed").encode(), MEDIA[fmt], headers
         if fmt == "csv":
