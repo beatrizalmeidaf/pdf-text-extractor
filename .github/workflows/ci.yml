@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TIKA_PATH: ${{ github.workspace }}/.tika  # where tika-python caches tika-server.jar
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: .tika
+          key: tika-server-3.3.2
+      - run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  web-engine:
+    # The browser engine (web/assets/engine.js) must give the same structure as Python.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+      - run: pip install -e ".[dev]"
+      - run: npm install --prefix tests/js
+      - run: python tests/js/expected.py tests/js/out
+      - run: node tests/js/parity.mjs tests/js/out
+      - run: for f in web/assets/*.js; do node --check "$f"; done
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t pdf-text-api .
+      - name: Smoke test
+        run: |
+          docker run -d -p 8000:8000 --name api pdf-text-api
+          for i in $(seq 1 60); do curl -sf localhost:8000/health | grep -q '"tika":"ok"' && break; sleep 2; done
+          curl -sf localhost:8000/health
+          curl -sf -F file=@web/assets/exemplo.pdf "localhost:8000/v1/extract?format=markdown" | tee out.md
+          grep -q "| Modelo | Precisão | Latência (ms) |" out.md
+          curl -sf -F file=@web/assets/exemplo.pdf "localhost:8000/v1/extract?mode=fast&format=text" | grep -q "Extração Estruturada"

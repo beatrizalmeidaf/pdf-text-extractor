@@ -1,0 +1,24 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu?
+      description: Inclua a resposta de erro da API (o campo `error.code`), se houver.
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: O que você esperava?
+  - type: textarea
+    id: repro
+    attributes:
+      label: Como reproduzir
+      description: Comando curl ou código Python. Se puder, anexe um PDF de exemplo sem dados sensíveis.
+  - type: input
+    id: version
+    attributes:
+      label: Versão / onde roda
+      placeholder: "2.0.0, Docker local / instância pública / pip"
