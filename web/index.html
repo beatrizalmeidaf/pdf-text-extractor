@@ -135,6 +135,7 @@
       <div class="toolbar">
         <div class="tabs" role="tablist" aria-label="Visualizações" data-i18n-attr="aria-label:tabs.label">
           <button role="tab" aria-selected="true" data-view="pages"><span data-i18n="tabs.pages">Páginas</span></button>
+          <button role="tab" aria-selected="false" data-view="diff"><span data-i18n="tabs.diff">Comparar</span></button>
           <button role="tab" aria-selected="false" data-view="markdown">Markdown</button>
           <button role="tab" aria-selected="false" data-view="tables"><span data-i18n="tabs.tables">Tabelas</span><span class="count" id="n-tables">0</span></button>
           <button role="tab" aria-selected="false" data-view="images"><span data-i18n="tabs.images">Imagens</span><span class="count" id="n-images">0</span></button>
@@ -178,6 +179,19 @@
             <p class="hint" data-i18n="inspector.hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>
           </aside>
         </div>
+      </div>
+      <div class="view" id="view-diff" role="tabpanel" hidden>
+        <div class="fidelity" id="fidelity" aria-live="polite"></div>
+        <div class="diff-bar">
+          <div class="segmented" style="width:230px" role="radiogroup" aria-label="Modo de comparação" data-i18n-attr="aria-label:diff.mode">
+            <label><input type="radio" name="diffmode" value="side" checked><span data-i18n="diff.side">Lado a lado</span></label>
+            <label><input type="radio" name="diffmode" value="overlay"><span data-i18n="diff.overlay">Sobrepor</span></label>
+          </div>
+          <label class="diff-opacity" id="diff-opacity-field" hidden><span data-i18n="diff.opacity">Opacidade da saída</span><input type="range" id="diff-opacity" min="0" max="100" value="60"></label>
+          <label class="check"><input type="checkbox" id="diff-only"><span data-i18n="diff.only">Só páginas com problemas</span></label>
+          <span class="diff-legend"><i class="miss"></i><span data-i18n="diff.legend.missing">texto do PDF que não está na saída</span><i class="flag"></i><span data-i18n="diff.legend.flag">bloco que falhou numa verificação</span></span>
+        </div>
+        <div class="diff-list" id="diff-list"><p class="hint" data-i18n="diff.wait">Extraia um PDF para comparar cada página com o que saiu dela.</p></div>
       </div>
       <div class="view" id="view-markdown" role="tabpanel" hidden>
         <div class="md-actions">
