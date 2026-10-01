@@ -1378,8 +1378,13 @@ function linesToBlocks(lines) {
         // Wrapped item text: indented under the text, or flush with the marker right after a full line.
         const edge = edges.get(prev) ?? Math.max(...group.map((g) => g.x1));
         const wrapped = ln.x0 >= group[0].x0 - 2 && prev.x1 >= edge - size * 2;
+        // Nor is it further below the item than the items are from each other: the line
+        // after the last option, one per line, is the text that follows them.
+        const afterItem = group.length === 1 && idx >= 2 && lines[idx - 1] === prev && blocks.length && blocks[blocks.length - 1].type === "list_item";
+        const above = afterItem ? lineGap(lines[idx - 2], prev) : null;
+        const apart = above !== null && gap > size * PARA_GAP_EM && gap - above > Math.max(1.5, gap * 0.2);
         // ("A. Related Work" in italics, then its paragraph in upright type: two blocks.)
-        cont = cont && (ln.x0 >= group[0].x0 + size * 0.3 || wrapped) && !hardBreak(prev, ln, edges) && !(group[0].italic && !ln.italic);
+        cont = cont && (ln.x0 >= group[0].x0 + size * 0.3 || wrapped) && !apart && !hardBreak(prev, ln, edges) && !(group[0].italic && !ln.italic);
       }
       else {
         const shortPrev = prev.x1 < Math.max(...group.map((g) => g.x1)) - size * 2.5;
@@ -1768,7 +1773,11 @@ async function analyzePage(pdf, number, opts) {
   const page = await pdf.getPage(number);
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const width = viewport.width, height = viewport.height;
-  const ops = await page.getOperatorList(); // also resolves the fonts
+  // With image crops on, the page has to be drawn anyway: it is drawn first and the operator
+  // list pdf.js built for that is read, instead of having the page interpreted (and its
+  // images decoded) a second time.
+  const drawn = opts.images && typeof document !== "undefined" ? await drawPage(page, opts.imageScale || 2) : null;
+  const ops = drawn?.ops || (await page.getOperatorList()); // also resolves the fonts
   const g = await readGraphics(page, viewport, width, height, ops);
   let { chars, rotated, fonts } = readGlyphs(page, viewport, ops, opts.tex);
   if (!chars.length && !rotated.length) {
@@ -1818,7 +1827,14 @@ async function analyzePage(pdf, number, opts) {
 
   const scanned = !chars.length && g.images.some((b) => area(b) > width * height * 0.5);
   const result = { number, width, height, blocks, scanned };
-  return { page: result, pdfPage: page, sizes, chars: chars.length };
+  // The crops are cut now, so that the drawing (megabytes per page) is not kept until the
+  // whole document is read. A block the later passes change is cut again (cropImages).
+  let crops = null;
+  if (drawn) {
+    crops = new Map(cropTargets(result).map((b) => [b, { box: b.bbox.join(), crop: cropOf(drawn.canvas, b, opts.imageScale || 2) }]));
+    drawn.canvas.width = drawn.canvas.height = 0; // free memory early
+  }
+  return { page: result, pdfPage: page, sizes, chars: chars.length, crops };
 }
 
 function groupRotated(chars) {
@@ -2116,31 +2132,47 @@ function linkCaptions(page) {
   }
 }
 
-async function cropImages(pdfPage, page, opts) {
-  const wanted = new Set(["figure", "table", "formula"]);
-  const targets = page.blocks.filter((b) => wanted.has(b.type) && b.bbox);
-  if (!targets.length) return;
-  const scale = opts.imageScale || 2;
+async function drawPage(pdfPage, scale) {
   const viewport = pdfPage.getViewport({ scale, rotation: 0 });
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
   await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport, background: "white" }).promise;
+  // (Not in pdf.js's public API: the operator list it keeps for the render it has just done.
+  // When it is not there, the caller asks for one the usual way.)
+  const lists = [...(pdfPage._intentStates?.values?.() || [])].map((state) => state.operatorList);
+  const ops = lists.find((l) => l?.lastChunk && l.fnArray?.length && l.argsArray?.length === l.fnArray.length) || null;
+  return { canvas, ops };
+}
+const cropTargets = (page) => page.blocks.filter((b) => (b.type === "figure" || b.type === "table" || b.type === "formula") && b.bbox);
+// The region of a block (and 3 pt around it) as PNG, or null when there is nothing to show.
+function cropOf(canvas, b, scale) {
+  const pad = 3;
+  const x0 = Math.max(0, (b.bbox[0] - pad) * scale), y0 = Math.max(0, (b.bbox[1] - pad) * scale);
+  const x1 = Math.min(canvas.width, (b.bbox[2] + pad) * scale), y1 = Math.min(canvas.height, (b.bbox[3] + pad) * scale);
+  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  if (w < 4 || h < 4) return null;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  c.getContext("2d").drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
+  return { width: w, height: h, data: c.toDataURL("image/png").split(",")[1] };
+}
+// `ready`: the crops cut while the page was analysed (block -> { box, crop }), used when every
+// block to show is still the one that was cut; otherwise the page is drawn again.
+async function cropImages(pdfPage, page, opts, ready = null) {
+  const targets = cropTargets(page);
+  if (!targets.length) return;
+  const scale = opts.imageScale || 2;
+  const reuse = !!ready && targets.every((b) => ready.get(b)?.box === b.bbox.join());
+  const canvas = reuse ? null : (await drawPage(pdfPage, scale)).canvas;
   const counters = {};
   for (const b of targets) {
-    const pad = 3;
-    const x0 = Math.max(0, (b.bbox[0] - pad) * scale), y0 = Math.max(0, (b.bbox[1] - pad) * scale);
-    const x1 = Math.min(canvas.width, (b.bbox[2] + pad) * scale), y1 = Math.min(canvas.height, (b.bbox[3] + pad) * scale);
-    const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
-    if (w < 4 || h < 4) continue;
-    const c = document.createElement("canvas");
-    c.width = w; c.height = h;
-    c.getContext("2d").drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
+    const crop = reuse ? ready.get(b).crop : cropOf(canvas, b, scale);
+    if (!crop) continue;
     counters[b.type] = (counters[b.type] || 0) + 1;
-    const data = c.toDataURL("image/png").split(",")[1];
-    b.image = { name: `p${page.number}-${b.type}-${counters[b.type]}.png`, mime: "image/png", width: w, height: h, data };
+    b.image = { name: `p${page.number}-${b.type}-${counters[b.type]}.png`, mime: "image/png", width: crop.width, height: crop.height, data: crop.data };
   }
-  canvas.width = canvas.height = 0; // free memory early
+  if (canvas) canvas.width = canvas.height = 0; // free memory early
 }
 
 export function parsePageSpec(spec, count) {
@@ -2226,7 +2258,7 @@ export async function extractDocument(data, opts = {}) {
       if (b.number === null) delete b.number;
     });
   }
-  if (o.images) for (const r of results) await cropImages(r.pdfPage, r.page, o);
+  if (o.images) for (const r of results) await cropImages(r.pdfPage, r.page, o, r.crops);
 
   const lowText = results.filter((r) => r.chars < SCANNED_CHARS_PER_PAGE).length;
   const elapsed = performance.now() - started;
