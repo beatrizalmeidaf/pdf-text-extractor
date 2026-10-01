@@ -44,7 +44,7 @@ jobs:
       id-token: write  # PyPI Trusted Publishing — nenhum token/segredo necessário
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install build && python -m build
