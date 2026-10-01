@@ -1827,11 +1827,21 @@ async function analyzePage(pdf, number, opts) {
 
   const scanned = !chars.length && g.images.some((b) => area(b) > width * height * 0.5);
   const result = { number, width, height, blocks, scanned };
-  // The crops are cut now, so that the drawing (megabytes per page) is not kept until the
-  // whole document is read. A block the later passes change is cut again (cropImages).
+  // The crops are cut now, by region, so that the drawing (megabytes per page) is not kept
+  // until the whole document is read. The document-wide passes still put figures together
+  // from their parts: those regions are worked out on a copy of the page and cut too. A
+  // region nobody foresaw has its page drawn again (cropImages).
   let crops = null;
   if (drawn) {
-    crops = new Map(cropTargets(result).map((b) => [b, { box: b.bbox.join(), crop: cropOf(drawn.canvas, b, opts.imageScale || 2) }]));
+    crops = new Map();
+    const cut = (b) => { const box = b.bbox.join(); if (!crops.has(box)) crops.set(box, cropOf(drawn.canvas, b, opts.imageScale || 2)); };
+    cropTargets(result).forEach(cut);
+    try {
+      const trial = { ...result, blocks: structuredClone(blocks) };
+      absorbFormulaBits(trial);
+      composeFigures(trial, body);
+      cropTargets(trial).forEach(cut);
+    } catch { /* the page is drawn again if it comes to that */ }
     drawn.canvas.width = drawn.canvas.height = 0; // free memory early
   }
   return { page: result, pdfPage: page, sizes, chars: chars.length, crops };
@@ -2157,17 +2167,17 @@ function cropOf(canvas, b, scale) {
   c.getContext("2d").drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
   return { width: w, height: h, data: c.toDataURL("image/png").split(",")[1] };
 }
-// `ready`: the crops cut while the page was analysed (block -> { box, crop }), used when every
-// block to show is still the one that was cut; otherwise the page is drawn again.
+// `ready`: the crops cut while the page was analysed (region -> crop), used when every block
+// to show has its region among them; otherwise the page is drawn again.
 async function cropImages(pdfPage, page, opts, ready = null) {
   const targets = cropTargets(page);
   if (!targets.length) return;
   const scale = opts.imageScale || 2;
-  const reuse = !!ready && targets.every((b) => ready.get(b)?.box === b.bbox.join());
+  const reuse = !!ready && targets.every((b) => ready.has(b.bbox.join()));
   const canvas = reuse ? null : (await drawPage(pdfPage, scale)).canvas;
   const counters = {};
   for (const b of targets) {
-    const crop = reuse ? ready.get(b).crop : cropOf(canvas, b, scale);
+    const crop = reuse ? ready.get(b.bbox.join()) : cropOf(canvas, b, scale);
     if (!crop) continue;
     counters[b.type] = (counters[b.type] || 0) + 1;
     b.image = { name: `p${page.number}-${b.type}-${counters[b.type]}.png`, mime: "image/png", width: crop.width, height: crop.height, data: crop.data };
@@ -2211,11 +2221,17 @@ async function readMetadata(pdf) {
  *          imageScale?: number, onProgress?: (done:number, total:number) => void}} opts
  * @returns {Promise<{doc: object, pdf: any}>}
  */
+const MAX_WORKERS = 4; // copies of the document read at once, each in a pdf.js worker
+const PAGES_PER_WORKER = 4; // below this many pages per copy, opening another does not pay
+
 export async function extractDocument(data, opts = {}) {
   const started = performance.now();
   const o = { tables: true, formulas: true, images: false, imageScale: 2, ...opts };
   // fontExtraProperties: glyph names, to read math symbols that have no Unicode mapping.
-  const task = pdfjsLib.getDocument({ data: new Uint8Array(data), password: o.password || undefined, isEvalSupported: false, fontExtraProperties: true });
+  const open = (bytes) => pdfjsLib.getDocument({ data: new Uint8Array(bytes), password: o.password || undefined, isEvalSupported: false, fontExtraProperties: true });
+  // (pdf.js takes the bytes away with it: a copy is kept to open the document again below.)
+  const spare = typeof Worker !== "undefined" && data.byteLength ? data.slice(0) : null;
+  const task = open(data);
   let pdf;
   try {
     pdf = await task.promise;
@@ -2226,11 +2242,23 @@ export async function extractDocument(data, opts = {}) {
   const indices = parsePageSpec(o.pages, pdf.numPages);
   const metadata = await readMetadata(pdf);
   o.tex = isTexProducer(metadata.producer);
-  const results = [];
-  for (const [k, i] of indices.entries()) {
-    results.push(await analyzePage(pdf, i + 1, o));
-    o.onProgress?.(k + 1, indices.length);
-  }
+  // pdf.js reads a page — and decodes its images — in one worker thread, and that is where
+  // most of the time goes. A longer document is opened a few times, each copy with a worker
+  // of its own, and its pages are shared out between them.
+  const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 2;
+  const copies = spare ? Math.max(0, Math.min(MAX_WORKERS, cores - 1, Math.floor(indices.length / PAGES_PER_WORKER)) - 1) : 0;
+  const extra = Array.from({ length: copies }, (_, k) => open(k + 1 < copies ? spare.slice(0) : spare));
+  const results = new Array(indices.length);
+  let next = 0, done = 0;
+  const readPages = async (document) => {
+    while (next < indices.length) {
+      const k = next++;
+      results[k] = await analyzePage(document, indices[k] + 1, o);
+      o.onProgress?.(++done, indices.length);
+    }
+  };
+  // (A copy that fails to open just takes no pages; the others read them all.)
+  await Promise.all([readPages(pdf), ...extra.map((t) => t.promise.then(readPages, () => {}))]);
   const layoutMs = performance.now() - started;
   const total = new Map();
   for (const r of results) for (const [k, n] of r.sizes) total.set(k, (total.get(k) || 0) + n);
@@ -2259,6 +2287,7 @@ export async function extractDocument(data, opts = {}) {
     });
   }
   if (o.images) for (const r of results) await cropImages(r.pdfPage, r.page, o, r.crops);
+  for (const t of extra) t.destroy().catch(() => {});
 
   const lowText = results.filter((r) => r.chars < SCANNED_CHARS_PER_PAGE).length;
   const elapsed = performance.now() - started;
