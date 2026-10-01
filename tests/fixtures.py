@@ -431,8 +431,9 @@ def declaration_pdf(path: Path) -> Path:
 def exam_pdf(path: Path) -> Path:
     """An exam question the way equation editors draw it (no real data): an exponent set a
     little smaller and raised, a stacked fraction (numerator, rule, denominator), a root sign
-    made of strokes over its radicand, chemical indices with the state of matter, and two
-    options full of exponents on consecutive lines."""
+    made of strokes over its radicand, chemical indices with the state of matter, two
+    options full of exponents on consecutive lines, two reactions on consecutive lines and a
+    root inside a framed note."""
     pdf, F = _pdf()
     pdf.add_page()
     pdf.set_line_width(0.2)
@@ -496,5 +497,26 @@ def exam_pdf(path: Path) -> Path:
     x = run(20, 104, "Dados: massas molares (g·mol")
     x = run(x, 102.4, "-1", size * 0.9)
     run(x, 104, ") H = 1, C = 12, N = 14, O = 16")
+
+    # Two reactions, one under the other: two equations.
+    for k, (left, right) in enumerate((("MnO", " + C → MnO + CO"), ("2 MnO + C → 2 Mn + CO", ""))):
+        y = 116 + 6 * k
+        x = run(40, y, left)
+        x = run(x, y + 1.4, "2", size * 0.9)
+        x = run(x, y, right)
+        if right:
+            run(x, y + 1.4, "2", size * 0.9)
+
+    # A root inside a framed note: the frame's bottom edge is not a box closing the radicand.
+    pdf.rect(18, 130, 120, 10)
+    x = run(20, 137, "Considere: ")
+    top, bottom = 133.2, 137.6
+    pdf.line(x + 0.1, 135.6, x + 0.7, 135.3)
+    pdf.line(x + 0.7, 135.3, x + 1.5, bottom)
+    pdf.line(x + 1.5, bottom, x + 2.4, top)
+    radicand = x + 2.6
+    pdf.line(x + 2.4, top, radicand + pdf.get_string_width("2") + 0.3, top)
+    x = run(radicand, 137, "2")
+    run(x, 137, " = 1,4 é o valor usado")
     pdf.output(str(path))
     return path
