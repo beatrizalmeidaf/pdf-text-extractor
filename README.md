@@ -132,7 +132,58 @@ papero-extract extract paper.pdf -o paper.json          # format from the extens
 papero-extract extract paper.pdf -f csv -o tables.csv   # tables only
 papero-extract extract paper.pdf -p 1-5 -f html
 papero-extract extract paper.pdf --fast                 # clean text only
+papero-extract batch ./documents -o ./dataset           # a whole folder, for RAG
 papero-extract serve --port 8000                        # API + browser app
+```
+
+</details>
+
+<details>
+<summary><b>Batch &amp; fidelity report</b> — a folder of PDFs to a RAG dataset, and which ones to review</summary>
+
+```bash
+papero-extract batch ./documents -o ./dataset
+```
+
+```text
+dataset/
+├── documents/        one .md and one .json per PDF (same sub-folders)
+├── chunks.jsonl      every chunk, cut at headings, tables kept whole
+├── manifest.json     per document: pages, tables, chunks, fidelity scores
+└── fidelity/
+    ├── report.json   totals, signals and every document's issues
+    ├── summary.html  the same, to open in a browser
+    └── problematic/  one .json per document with warnings or errors
+```
+
+Each chunk knows where it came from, so a retrieval hit can be shown on the page:
+
+```json
+{"id": "paper.pdf#12", "type": "table", "headings": ["4 Results"], "pages": [6, 6],
+ "blocks": ["p6-b3"], "text": "Table 2: Accuracy per model.\n\n| Model | Top-1 | …"}
+```
+
+The report checks every document against its own PDF — no ground truth, so read it as *where to look*, not as accuracy:
+
+| Signal | What is checked |
+|---|---|
+| `text` | the words PDFium reads on each page are all in the output |
+| `reading_order` | no block is read after one below it in the same column |
+| `tables` | every "Table N" caption has its table; each table is a clean grid |
+| `figures` | every "Figure N" caption has its figure |
+| `formulas` | each formula has LaTeX and no unmapped glyph |
+
+```python
+from papero_extract import extract
+from papero_extract.batch import run_batch
+from papero_extract.chunks import chunk_document
+from papero_extract.fidelity import assess, reference_text
+
+run_batch("./documents", "./dataset", workers=8)["totals"]   # {"documents": …, "ok": …, "warning": …, "error": …}
+
+doc = extract("paper.pdf")
+chunk_document(doc, document="paper.pdf", max_chars=1500)
+assess(doc, reference_text("paper.pdf")).issues              # [Issue(code="table_not_detected", pages=[5], …)]
 ```
 
 </details>

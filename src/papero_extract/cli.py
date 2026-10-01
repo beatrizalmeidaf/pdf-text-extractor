@@ -6,6 +6,7 @@ papero-extract extract artigo.pdf -f json -o artigo.json
 papero-extract extract artigo.pdf -f csv -o tabelas.csv # só as tabelas
 papero-extract extract contrato.docx -f text            # qualquer formato que o Tika lê
 papero-extract extract artigo.pdf --fast                # só texto, via Tika (mais rápido)
+papero-extract batch ./documentos -o ./dataset          # pasta -> chunks + relatório
 papero-extract serve --port 8000
 """
 
@@ -122,6 +123,62 @@ def _extract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _batch(args: argparse.Namespace) -> int:
+    from .batch import FORMATS as BATCH_FORMATS
+    from .batch import BatchOptions, find_documents, run_batch
+
+    source = Path(args.input)
+    if not source.exists():
+        print(f"erro: não encontrado: {args.input}", file=sys.stderr)
+        return 2
+    if not find_documents(source, args.pattern):
+        print(f"erro: nenhum arquivo '{args.pattern}' em {args.input}", file=sys.stderr)
+        return 2
+    formats = tuple(f for f in BATCH_FORMATS if f in args.formats.split(","))
+    options = BatchOptions(
+        formats=formats,
+        chunk_chars=args.chunk_size,
+        tables=not args.no_tables,
+        formulas=not args.no_formulas,
+        ocr=args.ocr,
+        ocr_language=args.ocr_language,
+        tika=not args.no_tika,
+        password=args.password,
+    )
+    marks = {"ok": "✓", "warning": "⚠", "error": "✗"}
+
+    def progress(done: int, total: int, entry: dict) -> None:
+        issues = ", ".join(i["code"] for i in entry["fidelity"]["issues"])
+        _report(f"[{done}/{total}] {marks[entry['status']]} {entry['document']}  {issues}", args)
+
+    summary = run_batch(
+        source,
+        args.output,
+        pattern=args.pattern,
+        workers=args.workers,
+        options=options,
+        progress=progress,
+    )
+    for note in summary["notes"]:
+        _warn(note)
+    t = summary["totals"]
+    lines = [
+        "",
+        f"{t['documents']} documentos, {t['pages']} páginas, {t['chunks']} chunks "
+        f"— {summary['elapsed_s']} s",
+        f"  ✓ {t['ok']:6d}  alta fidelidade",
+        f"  ⚠ {t['warning']:6d}  com avisos",
+        f"  ✗ {t['error']:6d}  com erros",
+        "",
+    ]
+    for name, s in summary["signals"].items():
+        if s["score"] is not None:
+            lines.append(f"  {name:14s}{s['score'] * 100:6.1f}%")
+    lines += ["", f"-> {Path(args.output) / 'fidelity' / 'summary.html'}"]
+    _report("\n".join(lines), args)
+    return 0
+
+
 def _serve(args: argparse.Namespace) -> int:
     try:
         import uvicorn
@@ -189,6 +246,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     ex.add_argument("-q", "--quiet", action="store_true", help="sem resumo no stderr")
     ex.set_defaults(func=_extract)
+
+    bt = sub.add_parser(
+        "batch", help="extrair uma pasta inteira: documentos, chunks e relatório de fidelidade"
+    )
+    bt.add_argument("input", help="pasta (percorrida com as subpastas) ou um arquivo")
+    bt.add_argument("-o", "--output", required=True, help="pasta do dataset gerado")
+    bt.add_argument("--pattern", default="*.pdf", help="arquivos a extrair (padrão: *.pdf)")
+    bt.add_argument(
+        "--formats", default="markdown,json", help="saídas por documento (padrão: markdown,json)"
+    )
+    bt.add_argument(
+        "--chunk-size", type=int, default=1500, help="tamanho máximo de um chunk, em caracteres"
+    )
+    bt.add_argument("--password")
+    bt.add_argument("--no-tables", action="store_true", help="não detectar tabelas")
+    bt.add_argument("--no-formulas", action="store_true", help="não detectar fórmulas")
+    bt.add_argument("--ocr", choices=("auto", "off", "force"), default="auto")
+    bt.add_argument("--ocr-language", default="por+eng")
+    bt.add_argument("--no-tika", action="store_true", help="só o motor de layout (sem Java)")
+    bt.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="documentos em paralelo (padrão: nº de CPUs)",
+    )
+    bt.add_argument("-q", "--quiet", action="store_true", help="sem progresso no stderr")
+    bt.set_defaults(func=_batch)
 
     sv = sub.add_parser("serve", help="subir a API HTTP e o app web")
     sv.add_argument("--host", default="0.0.0.0")
