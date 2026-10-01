@@ -34,8 +34,8 @@ jobs:
           key: tika-server-3.3.2
       - run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
       - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check .
+      - run: ruff check src tests
+      - run: ruff format --check src tests
       - run: pytest -q
 
   web-engine:

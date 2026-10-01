@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         prog="pdf-text-api",
-        description="Extração estruturada de PDFs e documentos (Apache Tika + PDFium).",
+        description="papero — extração estruturada de PDFs e documentos (Apache Tika + PDFium).",
     )
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)

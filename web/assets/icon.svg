@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="papero">
+  <title>papero</title>
+  <g fill="#F26A0F" stroke="#F26A0F" stroke-width="1.6" stroke-linejoin="round">
+    <!-- the page: a tall sheet whose lower half breaks into blocks of structure -->
+    <path d="M13 17.5 L29.5 8 L29.5 30 L25 34.5 L25 56 L13 49 Z"/>
+    <!-- folded corner -->
+    <path d="M33.5 9.5 L49 24.5 L33.5 24.5 Z"/>
+    <!-- the sheet turning into extracted blocks -->
+    <path d="M28.5 40 L49 27.5 L49 34 L40.5 34 L40.5 40 Z"/>
+  </g>
+  <g fill="#F26A0F">
+    <rect x="43" y="37" width="6.5" height="6.5" rx="1"/>
+    <rect x="33" y="45" width="6" height="6" rx="1"/>
+  </g>
+</svg>

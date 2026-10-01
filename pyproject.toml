@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pdf-text-api"
 version = "3.0.0"
-description = "PDF to Markdown, JSON and tables: structured PDF extraction (reading order, tables, formulas, images, bounding boxes) on Apache Tika. Python library, CLI, REST API and browser app."
+description = "papero — PDF to Markdown, JSON and tables: structured PDF extraction (reading order, tables, formulas, images, bounding boxes) on Apache Tika. Python library, CLI, REST API and browser app."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

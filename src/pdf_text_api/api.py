@@ -265,9 +265,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pool.stop()
 
     app = FastAPI(
-        title="PDF Text API",
+        title="papero API",
         version=__version__,
-        summary="Extração estruturada de PDFs e documentos com Apache Tika — rápida, open source.",
+        summary="papero — extração estruturada de PDFs e documentos (Apache Tika + PDFium).",
         description=(
             "Envie um PDF (ou DOCX, PPTX, XLSX, HTML, EPUB…) e receba Markdown, JSON com "
             "posições, tabelas estruturadas, fórmulas em LaTeX e imagens recortadas. "

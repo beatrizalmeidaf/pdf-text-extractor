@@ -1,258 +1,677 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/4795977c-7651-4969-bb32-374fbf3fc7d2" alt="PDF Text Extractor" width="220"/>
-</p>
-
-<h1 align="center">PDF Text Extractor</h1>
-
-<p align="center">
-  <strong>PDF para Markdown, JSON, Excel e Word — com ordem de leitura, tabelas, fórmulas, imagens e a posição de cada bloco.</strong><br>
-  Open source, roda na CPU, sem modelos de IA. Biblioteca Python, CLI, API REST (Apache Tika) e um app web que funciona 100% no navegador.
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/assets/logo-dark.png">
+    <img src="web/assets/logo-light.png" alt="papero" width="460">
+  </picture>
 </p>
 
 <p align="center">
-  <a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/"><b>▶ Usar no navegador</b></a> ·
-  <a href="#biblioteca-python">Python</a> ·
-  <a href="#api-rest">API</a> ·
+  <strong>Document structure extraction without the heavyweight stack.</strong>
+</p>
+
+<p align="center">
+  PDF → Markdown · JSON · Excel · Word
+  <br>
+  Reading order · Tables · Formulas · Figures · Bounding boxes
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#python">Python</a> ·
   <a href="#cli">CLI</a> ·
-  <a href="#english">English</a>
+  <a href="#rest-api">REST API</a> ·
+  <a href="#benchmarks">Benchmarks</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml"><img src="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor/pkgs/container/pdf-text-extractor"><img src="https://img.shields.io/badge/docker-ghcr.io-2496ED.svg" alt="Docker"></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg" alt="MIT"></a>
-  <img src="https://img.shields.io/badge/Apache-Tika-D22128.svg" alt="Apache Tika">
-  <img src="https://img.shields.io/badge/RAG-ready-8A2BE2.svg" alt="RAG ready">
+  <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml">
+    <img src="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB.svg" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="MIT License">
+  <img src="https://img.shields.io/badge/runs%20on-CPU-2ea44f.svg" alt="Runs on CPU">
+  <img src="https://img.shields.io/badge/ML%20models-none-8A2BE2.svg" alt="No ML models">
+  <img src="https://img.shields.io/badge/engine-Apache%20Tika%20%2B%20PDFium-D22128.svg" alt="Apache Tika + PDFium">
+</p>
+
+<p align="center">
+  <a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+    <strong>▶ Try Papero in your browser</strong>
+  </a>
 </p>
 
 ---
 
-## O que ele faz
+## Why Papero?
 
-| | |
-|---|---|
-| **Ordem de leitura** | Documentos de 2 ou 3 colunas lidos coluna a coluna (XY-cut que não confunde coluna de texto com coluna de tabela). |
-| **Tabelas estruturadas** | Com bordas (grade do Word), sem bordas (alinhamento) e *booktabs* do LaTeX (só réguas horizontais). Células de várias linhas e linhas mescladas preservadas. Saem como linhas e colunas: Markdown, CSV, Excel. |
-| **Fórmulas** | Sobrescrito, subscrito e símbolos viram LaTeX (`E = mc^{2}`, `\sum \alpha \leq \beta`), com o número da equação, mais o recorte da fórmula em PNG. |
-| **Imagens** | Figuras, gráficos vetoriais (com eixos, legenda e rótulos), tabelas e fórmulas recortados em PNG — a imagem fica junto da posição de onde veio. |
-| **Posição de tudo** | Cada bloco tem `bbox` em pontos (origem no topo da página): dá para desenhar por cima do PDF, citar a origem num RAG ou recortar. |
-| **Símbolos e acentos** | Ligaduras (`ﬁ`→`fi`), bullets das fontes Symbol/Wingdings, letras gregas e acentos do LaTeX desenhados à parte (`Computa¸ca˜o` → `Computação`). |
-| **Limpeza** | Cabeçalhos, rodapés, números de página e logos repetidos ficam fora do texto (mas continuam no JSON, marcados). Palavras hifenizadas na quebra de linha são unidas. |
-| **Qualquer formato** | Pelo Apache Tika: DOCX, PPTX, XLSX, ODT, RTF, EPUB, HTML, e-mails — e **OCR** (Tesseract) em PDFs escaneados. |
-| **Exporta para** | Markdown, texto, HTML (com `data-bbox`), JSON, CSV, Excel (.xlsx), Word (.docx) ou um ZIP com tudo + pasta `images/`. |
+Extracting text from a document is easy.
 
-### Como funciona
+Extracting its **structure** is not.
 
-Dois motores rodam **ao mesmo tempo** sobre o mesmo arquivo:
+Papero reconstructs documents into structured, machine-readable data while preserving:
 
-- **Apache Tika** (Java) — metadados, títulos marcados do PDF (*tagged PDF*), OCR e todos os formatos que não são PDF. Falamos direto com o Tika Server por conexões persistentes, sem o `tika-python` no caminho: metade da latência.
-- **Motor de layout sobre o PDFium** — lê cada glifo com posição, fonte e tamanho, e cada traço e imagem da página, e reconstrói colunas, tabelas, fórmulas, listas e figuras.
+- reading order across columns
+- paragraphs and headings
+- tables, including multi-line cells
+- formulas and LaTeX
+- figures and images
+- block coordinates
+- headers, footers and page numbers
+- document metadata
 
-O app web usa **o mesmo algoritmo portado para JavaScript sobre o pdf.js** e devolve o mesmo JSON. O CI compara os dois motores bloco a bloco em cada commit.
+It runs on **CPU**, requires **no ML models**, and can be used as a Python library, CLI, REST API, Docker service, or directly in the browser.
 
-## Usar no navegador
+---
 
-**[beatrizalmeidaf.github.io/pdf-text-extractor](https://beatrizalmeidaf.github.io/pdf-text-extractor/)** — arraste um PDF e veja cada bloco destacado na página, com abas de Markdown, tabelas, imagens, texto e JSON, e exportação para o formato que quiser. O arquivo **não sai do seu computador**.
+## Quick Start
 
-Para DOCX/PPTX, OCR de escaneados e o motor completo com Tika, escolha "Servidor (Tika)" e aponte para a sua API (`docker compose up`). A mesma página é servida pela API em `/`.
-
-## Biblioteca Python
+### Install
 
 ```bash
-pip install pdf-text-api            # biblioteca + CLI (Java 11+ para o Tika)
-pip install "pdf-text-api[api]"     # + servidor HTTP
+pip install pdf-text-api   # the package keeps its name; papero is the project's name
 ```
+
+### Extract a document
 
 ```python
-from pdf_text_api import extract, extract_text
+from pdf_text_api import extract
 
-doc = extract("artigo.pdf", images=True)       # estruturado (padrão)
-print(doc.to_markdown())                        # Markdown pronto para RAG/LLM
-doc.tables[0].rows                              # [["Modelo", "Precisão"], ["Base", "0,81"], ...]
-doc.formulas[0].latex                           # "E = mc^{2}"
-doc.figures[0].image.data                       # PNG da figura
-for block in doc.pages[0].blocks:               # tudo, em ordem de leitura, com posição
-    print(block.type, block.bbox, block.text[:60])
+doc = extract("paper.pdf")
 
-doc.to_html(); doc.to_dict()                    # HTML com data-bbox, JSON
-extract("relatorio.docx").to_markdown()         # qualquer formato que o Tika lê
-extract_text("contrato.pdf").text               # só texto, o mais rápido (Tika)
+print(doc.to_markdown())
 ```
 
-Opções de `extract()`: `pages="1-3,5"`, `password=`, `images=True`, `image_scale=2.0`, `tables=`, `formulas=`, `ocr="auto"|"force"|"off"`, `ocr_language="por+eng"`, `tika=False` (só o motor de layout, sem Java), `workers=` (processos para PDFs longos).
+That's it.
 
-O Tika Server é iniciado e aquecido sozinho na primeira chamada (o jar é baixado uma vez). Para usar um servidor já rodando: `PTE_TIKA_URL=http://localhost:9998`.
+Papero returns a structured document that you can feed into RAG pipelines, search systems, LLM workflows, data processing pipelines, or your own applications.
+
+---
+
+## Python
+
+```python
+from pdf_text_api import extract
+
+doc = extract("paper.pdf", images=True)
+
+print(doc.to_markdown())
+
+print(doc.tables[0].rows)
+
+print(doc.formulas[0].latex)
+
+for block in doc.pages[0].blocks:
+    print(block.type, block.bbox, block.text)
+```
+
+You can also extract only text:
+
+```python
+from pdf_text_api import extract_text
+
+text = extract_text("paper.pdf").text
+```
+
+### Supported options
+
+```python
+extract(
+    "paper.pdf",
+    pages="1-3,5",
+    images=True,
+    image_scale=2.0,
+    tables=True,
+    formulas=True,
+    ocr="auto",
+    ocr_language="por+eng",
+    tika=False,
+    workers=4,
+)
+```
+
+---
+
+## What Papero extracts
+
+| Feature              | Output                        |
+| -------------------- | ----------------------------- |
+| Reading order        | Structured blocks             |
+| Headings             | Heading + level               |
+| Paragraphs           | Clean text                    |
+| Lists                | Items + markers               |
+| Tables               | Rows, columns, multi-line cells (ruled, borderless, booktabs) |
+| Formulas             | LaTeX + cropped image         |
+| Figures              | Cropped PNG                   |
+| Bounding boxes       | `[x0, y0, x1, y1]` in points, origin at the top-left |
+| Metadata             | Title, author, language, etc. |
+| Headers / footers    | Detected and marked           |
+| Page numbers         | Detected separately           |
+| OCR                  | Tesseract                     |
+| Multi-column layouts | Column-aware reading order    |
+| Inline formatting    | Bold, italic, super/subscript runs |
+| Layout               | Alignment, indents, line spacing, letter spacing |
+| Hidden text          | White-on-white text dropped (forms, templates) |
+
+---
+
+## Supported formats
+
+Papero's structured PDF engine works alongside Apache Tika for broader document support.
+
+### Documents
+
+* PDF
+* DOCX
+* PPTX
+* XLSX
+* ODT
+* RTF
+* EPUB
+* HTML
+* email formats
+
+### Output
+
+| Format | Python / CLI / API | Browser app |
+| --- | :---: | :---: |
+| Markdown | ✓ | ✓ |
+| JSON (blocks, bbox, runs, layout) | ✓ | ✓ |
+| Plain text | ✓ | ✓ |
+| HTML (keeps alignment and indents) | ✓ | ✓ |
+| CSV (tables) | ✓ | ✓ |
+| ZIP + extracted images | ✓ | ✓ |
+| Word `.docx` (keeps the page's layout) | — | ✓ |
+| Excel `.xlsx` (one sheet per table) | — | ✓ |
+
+---
+
+## Built for RAG and LLM pipelines
+
+Papero is designed for the step that usually happens **before** embeddings, chunking and retrieval:
+
+```text
+Document
+   │
+   ▼
+┌──────────────┐
+│    Papero    │
+└──────┬───────┘
+       │
+       ▼
+Structured document
+       │
+       ├── Markdown
+       ├── JSON
+       ├── Tables
+       ├── Formulas
+       ├── Figures
+       └── Bounding boxes
+       │
+       ▼
+Chunking / Embeddings / RAG / LLM
+```
+
+Because every block retains its position, the output can also be mapped back to the original document.
+
+For example:
+
+```json
+{
+  "type": "table",
+  "bbox": [56.7, 294.8, 481.9, 374.2],
+  "rows": [
+    ["Model", "Accuracy"],
+    ["Base", "0.81"]
+  ]
+}
+```
+
+This makes it possible to preserve both **content and provenance**.
+
+---
+
+## Browser
+
+Papero also runs in the browser.
+
+**Your PDF stays on your machine.**
+
+<a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+  <strong>▶ Open the browser app</strong>
+</a>
+
+The web application lets you inspect:
+
+* extracted text
+* Markdown
+* tables
+* images
+* JSON
+* document blocks
+* block coordinates
+
+The browser implementation uses the same structural concepts as the Python engine, ported to JavaScript with pdf.js.
+
+---
 
 ## CLI
 
-```bash
-pdf-text-api extract artigo.pdf -o artigo.md --images   # Markdown + pasta images/
-pdf-text-api extract artigo.pdf -o artigo.json           # formato pela extensão
-pdf-text-api extract artigo.pdf -f csv -o tabelas.csv    # só as tabelas
-pdf-text-api extract artigo.pdf -p 1-5 -f html           # páginas 1 a 5, em HTML
-pdf-text-api extract apresentacao.pptx                   # qualquer formato do Tika
-pdf-text-api extract contrato.pdf --fast                 # só texto, via Tika
-pdf-text-api serve --port 8000                           # API + app web
-```
-
-## API REST
+Install the package and use the command line:
 
 ```bash
-docker compose up        # API + Tika + Tesseract + app web em http://localhost:8000
+pdf-text-api extract paper.pdf -o paper.md --images
 ```
+
+JSON:
 
 ```bash
-curl -F "file=@artigo.pdf" "localhost:8000/v1/extract?format=markdown"
-curl -F "file=@artigo.pdf" "localhost:8000/v1/extract?format=zip&images=true" -o artigo.zip
-curl -F "file=@artigo.pdf" "localhost:8000/v1/extract?per_page=true"          # JSON com blocos e bbox
+pdf-text-api extract paper.pdf -o paper.json
 ```
 
-Um endpoint: `POST /v1/extract`, arquivo no campo `file` (multipart). Documentação interativa em `/docs`.
+Tables:
 
-| Parâmetro | Padrão | O que faz |
-|---|---|---|
-| `mode` | `structured` | `structured` (layout + Tika) ou `fast` (só texto, Tika) |
-| `format` | `json` | `json`, `markdown`, `text`, `html`, `csv` (tabelas), `zip` (tudo + imagens) |
-| `pages` | todas | `1-3,5,10-` |
-| `per_page` | `false` | JSON: incluir as páginas com os blocos e suas posições |
-| `images` | `false` | Recortar figuras, tabelas e fórmulas em PNG |
-| `tables` / `formulas` | `true` | Detectar tabelas / fórmulas |
-| `ocr` | `auto` | `auto` (só páginas escaneadas), `force`, `off` |
-| `ocr_language` | `por+eng` | Idiomas do Tesseract |
-| `password` (form) | — | Senha do PDF |
+```bash
+pdf-text-api extract paper.pdf -f csv -o tables.csv
+```
 
-Formato do JSON (o mesmo da biblioteca e do app web):
+Specific pages:
+
+```bash
+pdf-text-api extract paper.pdf -p 1-5 -f html
+```
+
+Fast text extraction:
+
+```bash
+pdf-text-api extract paper.pdf --fast
+```
+
+Run the web/API server:
+
+```bash
+pdf-text-api serve --port 8000
+```
+
+---
+
+## REST API
+
+Run the complete stack:
+
+```bash
+docker compose up
+```
+
+The API will be available at:
+
+```text
+http://localhost:8000
+```
+
+Extract Markdown:
+
+```bash
+curl \
+  -F "file=@paper.pdf" \
+  "localhost:8000/v1/extract?format=markdown"
+```
+
+Extract everything as a ZIP:
+
+```bash
+curl \
+  -F "file=@paper.pdf" \
+  "localhost:8000/v1/extract?format=zip&images=true" \
+  -o paper.zip
+```
+
+Get page-level blocks and coordinates:
+
+```bash
+curl \
+  -F "file=@paper.pdf" \
+  "localhost:8000/v1/extract?per_page=true"
+```
+
+Interactive API documentation:
+
+```text
+/docs
+```
+
+---
+
+## How it works
+
+Papero combines two complementary processing paths.
+
+### PDF layout engine
+
+The PDF engine operates on PDF-level geometry:
+
+* glyph positions
+* fonts
+* font sizes
+* lines
+* images
+* page coordinates
+
+It uses this information to reconstruct:
+
+* columns
+* paragraphs
+* tables
+* lists
+* formulas
+* figures
+* reading order
+
+### Apache Tika
+
+Apache Tika provides:
+
+* document metadata
+* tagged-PDF information
+* OCR integration
+* support for additional document formats
+
+The two paths can run in parallel.
+
+For the browser, the structural engine is implemented with JavaScript and pdf.js.
+
+---
+
+## Benchmarks
+
+Papero includes reproducible benchmark scripts and a dataset of academic PDFs.
+
+The benchmark uses dense academic papers with:
+
+* multiple columns
+* mathematical formulas
+* tables
+* figures
+* long documents
+
+Tests were performed locally on CPU.
+
+### 50-paper benchmark
+
+| Tool              |      Total | Average / PDF |
+| ----------------- | ---------: | ------------: |
+| PyMuPDF           |     4.86 s |      97.23 ms |
+| **Papero — fast** | **6.78 s** | **135.65 ms** |
+| PyPDF             |   1 m 16 s |    1520.24 ms |
+| pdfplumber        |   2 m 57 s |    3555.92 ms |
+| Docling           |  ~1 h 09 m |       ~82.9 s |
+
+<p align="center">
+  <img src="benchmarks/latency.svg" alt="Average extraction time per PDF on a log scale: PyMuPDF 97 ms, papero fast 136 ms, papero structured 902 ms, pypdf 1.52 s, pdfplumber 3.56 s, Docling 82.9 s" width="760">
+</p>
+
+These numbers describe this benchmark configuration (one laptop CPU, no GPU) and should not be read as universal performance figures. `papero · fast` returns clean text; `papero · structured` also reconstructs reading order, tables, formulas and figures for every page.
+
+### Structured mode
+
+On 54 academic PDFs:
+
+| Metric        |     Result |
+| ------------- | ---------: |
+| Failures      | **0 / 54** |
+| Median / page |  **34 ms** |
+| P90 / page    |  **57 ms** |
+| Paragraphs    |      9,259 |
+| Headings      |        762 |
+| List items    |      1,412 |
+| Tables        |        286 |
+| Figures       |        499 |
+| Formulas      |        738 |
+| Captions      |        385 |
+
+Run the benchmark yourself:
+
+```bash
+python benchmarks/download_arxiv_pdfs.py
+python benchmarks/run_massive_benchmark.py
+```
+
+---
+
+## Feature comparison
+
+| Feature                    | Papero | PyMuPDF | pdfplumber | pypdf | Docling |  Marker |
+| -------------------------- | :----: | :-----: | :--------: | :---: | :-----: | :-----: |
+| License                    |  MIT   |   AGPL  |     MIT    |  BSD  |   MIT   |   GPL   |
+| No ML models               |    ✓   |    ✓    |      ✓     |   ✓   |    —    |    —    |
+| Multi-column reading order |    ✓   | partial |      —     |   —   |    ✓    |    ✓    |
+| Structured tables          |    ✓   |    ✓    |      ✓     |   —   |    ✓    |    ✓    |
+| Formula extraction         | LaTeX (from glyphs) + image | — | — | — | ✓ (model) | ✓ (model) |
+| Bounding boxes             |    ✓   |    ✓    |      ✓     |   —   |    ✓    |    ✓    |
+| DOCX/PPTX/XLSX/EPUB/HTML   |    ✓   | partial |      —     |   —   |    ✓    | partial |
+| OCR                        |    ✓   |    ✓    |      —     |   —   |    ✓    |    ✓    |
+| Runs fully in the browser  |    ✓   |    —    |      —     |   —   |    —    |    —    |
+| Word export keeping layout |    ✓   |    —    |      —     |   —   |    —    |    —    |
+| REST API                   |    ✓   |    —    |      —     |   —   |    —    |    —    |
+
+---
+
+## JSON schema
+
+Papero exposes a structured representation of the document:
 
 ```json
 {
   "schema": "pdf-text-api/document@1",
   "engine": "tika+pdfium",
   "page_count": 12,
-  "metadata": { "title": "…", "author": "…", "language": "pt" },
-  "timings": { "layout_ms": 120.4, "tika_ms": 48.1, "total_ms": 122.9 },
-  "markdown": "# Título\n\n…",
-  "pages": [{
-    "number": 1, "width": 595.3, "height": 841.9,
-    "blocks": [
-      { "id": "p1-b3", "type": "table", "bbox": [56.7, 294.8, 481.9, 374.2],
-        "rows": [["Modelo", "Precisão"], ["Base", "0,81"]],
-        "caption": "Tabela 1: Comparação entre modelos.",
-        "image": { "name": "p1-table-1.png", "mime": "image/png", "data": "iVBOR…" } },
-      { "id": "p1-b4", "type": "formula", "bbox": […], "text": "E = mc²",
-        "latex": "E = mc^{2}", "number": "(1)" }
-    ]
-  }]
+  "metadata": {
+    "title": "...",
+    "author": "...",
+    "language": "en"
+  },
+  "pages": [
+    {
+      "number": 1,
+      "width": 595.3,
+      "height": 841.9,
+      "blocks": [
+        {
+          "id": "p1-b3",
+          "type": "table",
+          "bbox": [56.7, 294.8, 481.9, 374.2],
+          "rows": [
+            ["Model", "Accuracy"],
+            ["Base", "0.81"]
+          ]
+        }
+      ]
+    }
+  ]
 }
 ```
 
-Tipos de bloco: `heading` (com `level`), `paragraph`, `list_item` (com `marker`), `table`, `figure`, `formula`, `caption`, `code`, e os que ficam fora do texto: `header`, `footer`, `page_number`.
+Block types include:
 
-Erros sempre como `{"error": {"code", "message"}}`: `empty_file` (400), `unauthorized` (401), `file_too_large`/`too_many_pages` (413), `invalid_pdf`/`encrypted_pdf`/`invalid_page_range`/`parser_crashed` (422), `rate_limited` (429), `busy`/`tika_unavailable` (503), `timeout` (504).
-
-### Latência
-
-- O Tika e o layout rodam **em paralelo**: o tempo é o maior dos dois, não a soma.
-- Conexões *keep-alive* com o Tika Server e JVM aquecida na inicialização.
-- Páginas de documentos longos são divididas entre processos (`PTE_WORKERS`).
-- Uploads repetidos com as mesmas opções saem do cache em memória (header `X-Cache: hit`).
-- `Server-Timing` traz o tempo de cada etapa.
-
-Configuração por variáveis de ambiente — veja [`.env.example`](.env.example) (limites, chaves de API, rate limit, CORS, cache, Tika externo).
-
-## Desempenho (Massive Benchmark)
-
-Testado com um dataset real de **50 PDFs acadêmicos** baixados do **arXiv** (papers densos de Inteligência Artificial, média de 15 páginas, em múltiplas colunas e com equações matemáticas). 
-
-> **Metodologia Importante:** Todos os testes abaixo foram executados estritamente em **CPU local**, sem uso de nenhuma aceleração por placa de vídeo (GPU), simulando ambientes de servidores comuns e lambdas.
-
-O motor TikaClient otimizado roda na JVM com `keep-alive` habilitado e anti-kerning acionado.
-
-| Ferramenta | Tempo Total (Estimado 50 Papers) | Tempo Médio/PDF | Características |
-|:---|---:|---:|:---|
-| **PyMuPDF** (C++) | 4.86s | 97.23 ms | Apenas texto bruto e caótico; perde parágrafos e tabelas |
-| **PDF Text Extractor** (modo `fast`) | **6.78s** | **135.65 ms** | **Retorna Markdown limpo estruturado; roda em qualquer OS** |
-| **PyPDF** (Python) | 1m 16s | 1520.24 ms | Engine padrão, quebra linhas no meio e é lenta |
-| **pdfplumber** (Python) | 2m 57s | 3555.92 ms | Extração focada em visual/tabelas, mas pesada na CPU |
-| **Docling (IBM)** (PyTorch/C++) | ~1h 09m | 82880.45 ms | Extremamente lento em CPU (~83s/paper). Possui bugs com acentuação no Windows (necessita bypass) |
-
-![Gráfico de Desempenho](benchmarks/benchmark_results.png)
-
-> **Nota:** Estes são **PDFs densos do arXiv** (dataset DocBank). Nosso extrator usando Tika processa a impressionante marca de **~9ms por página**, enquanto as ferramentas hypadas baseadas em IA (Docling) gastam literalmente mais de 1 minuto inteiro por PDF rodando na CPU, além de serem difíceis de configurar localmente.
-
-Rode você mesmo testando com seus PDFs ou baixando os papers:
-```bash
-python benchmarks/download_arxiv_pdfs.py
-python benchmarks/run_massive_benchmark.py
+```text
+heading
+paragraph
+list_item
+table
+figure
+formula
+caption
+code
+header
+footer
+page_number
 ```
 
-### Como nos comparamos com outras ferramentas?
+---
 
-Se você está construindo pipelines de **RAG** ou alimentando **LLMs**, o mercado geralmente força uma escolha entre **Velocidade Bruta** ou **Fidelidade de Estrutura**. O `pdf-text-extractor` foi desenhado para ser o meio-termo perfeito:
+## OCR
 
-1. **Ferramentas de IA (Docling / Marker):** Lentas (chegam a mais de 1.5s por página) e dão crash em pastas locais do Windows sem placa de vídeo (dependem do PyTorch). São excelentes para layouts caóticos se você tiver GPUs caras.
-2. **Bibliotecas de Baixo Nível (PyMuPDF):** Rápido (6ms) mas perde a semântica do Markdown e junta colunas desordenadas.
-3. **Nosso Extrator (TikaClient):** Roda em **~134 ms por paper acadêmico (~9 ms por página)** em processadores comuns e utiliza heurísticas na engine do Tika para devolver o texto já formatado em **Markdown Estruturado**. É o *sweet spot* ideal para produção.
+Scanned PDFs can be processed through Tesseract:
 
-### Modo estruturado no mesmo dataset
+```bash
+docker compose up
+```
 
-Medido com o modo estruturado (`extract(..., tika=False)`, um processo, CPU de notebook) nos **54 PDFs do arXiv** de `benchmarks/dataset`:
+Or configure OCR through Python:
 
-| | |
-|---|---|
-| Falhas | **0 de 54** |
-| Tempo por página (mediana / p90) | **34 ms / 57 ms** |
-| Blocos encontrados | 9.259 parágrafos, 762 títulos, 1.412 itens de lista, 286 tabelas, 499 figuras, 738 fórmulas, 385 legendas |
+```python
+doc = extract(
+    "scanned.pdf",
+    ocr="auto",
+    ocr_language="por+eng",
+)
+```
 
-Com o Tika ligado, o tempo total quase não muda: ele roda em paralelo ao layout. No modo `fast` (só texto via Tika), o cliente próprio responde em ~10–17 ms um PDF de 1–3 páginas, contra ~31–37 ms do `tika-python` (mesmo servidor, aquecido).
+Available modes:
 
-### Comparação de recursos
+```text
+auto
+force
+off
+```
 
-| | Este projeto | PyMuPDF | pdfplumber | pypdf | Docling | Marker |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Licença | MIT | AGPL | MIT | BSD | MIT | GPL |
-| Precisa de modelos de IA / PyTorch | não | não | não | não | sim | sim |
-| Ordem de leitura em colunas | ✓ | parcial | — | — | ✓ | ✓ |
-| Tabelas estruturadas | ✓ | ✓ | ✓ | — | ✓ | ✓ |
-| Fórmulas em LaTeX | aproximado (glifos) | — | — | — | ✓ (modelo) | ✓ (modelo) |
-| Posição (bbox) de cada bloco | ✓ | ✓ | ✓ | — | ✓ | ✓ |
-| DOCX/PPTX/XLSX/EPUB/HTML | ✓ (Tika) | parcial | — | — | ✓ | parcial |
-| OCR de escaneados | ✓ (Tika + Tesseract) | ✓ | — | — | ✓ | ✓ |
-| Roda inteiro no navegador | ✓ | — | — | — | — | — |
-| API REST pronta (Docker) | ✓ | — | — | — | — | — |
+---
 
-Onde as ferramentas com modelos de IA ganham: layouts muito irregulares, fórmulas complexas (frações empilhadas, matrizes) e tabelas sem nenhuma pista visual. Aqui a fórmula sai em LaTeX montado a partir dos glifos **e** como imagem recortada, para você escolher.
+## Limitations
 
-## Limitações conhecidas
+Papero is intentionally transparent about where its current approach has limitations.
 
-- **Fórmulas**: o LaTeX é montado a partir dos glifos (símbolos, sobrescrito, subscrito). Frações empilhadas, matrizes e raízes grandes saem lineares — use o recorte PNG da fórmula.
-- **Tabelas sem bordas com colunas muito próximas** (vão menor que ~1 em entre colunas) podem ser lidas como texto corrido.
-- **Motor do navegador**: o pdf.js não informa a posição de cada glifo, então textos com espaçamento entre letras (`T Í T U L O`) podem sair com espaços a mais; o modo servidor não tem esse problema. OCR só no modo servidor.
-- **PDFs escaneados** precisam do Tesseract (já incluso na imagem Docker); a resposta sinaliza com `likely_scanned`.
-- Cabeçalhos e rodapés repetidos são detectados a partir de 2 páginas.
+### Complex mathematical notation
 
-## Desenvolvimento
+Formula reconstruction is based on PDF glyph geometry.
+
+Very complex structures such as:
+
+* large matrices
+* stacked fractions
+* complex radicals
+
+may not produce perfect LaTeX.
+
+The original formula crop is also available as an image.
+
+### Borderless tables
+
+Tables with very small spacing between columns can sometimes be interpreted as continuous text.
+
+### Browser positioning
+
+The browser implementation depends on the positioning information exposed by pdf.js. Some PDFs with unusual character spacing can therefore behave differently from the server engine.
+
+### Scanned documents
+
+OCR requires the server/Tesseract path.
+
+---
+
+## Development
+
+Clone the repository:
+
+```bash
+git clone https://github.com/beatrizalmeidaf/pdf-text-extractor.git
+cd pdf-text-extractor
+```
+
+Install development dependencies:
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # Python (inclui casos reais: booktabs, gráficos, acentos do LaTeX…)
-ruff check . && ruff format --check .
-npm install --prefix tests/js && python tests/js/expected.py tests/js/out && node tests/js/parity.mjs tests/js/out
-python -m http.server -d web    # app web em http://localhost:8000
 ```
 
-O app web é estático (HTML + JS, sem build) e é publicado no GitHub Pages pelo workflow `pages.yml` — ative em *Settings → Pages → Source: GitHub Actions*.
+Run tests:
 
-## Palavras-chave
+```bash
+pytest -q
+```
 
-PDF para Markdown · PDF to Markdown · PDF to JSON · PDF para Excel · PDF para Word · extrair tabelas de PDF · PDF table extraction · extrair texto de PDF · PDF text extraction · PDF parser Python · document parsing · layout analysis · reading order · multi-column PDF · extrair fórmulas LaTeX de PDF · PDF math extraction · extrair imagens de PDF · bounding boxes · OCR PDF · Apache Tika · PDFium · pdf.js · RAG preprocessing · LLM document loader · chunking · conversor de PDF online sem upload · open source · self-hosted · FastAPI · Docker · alternativa ao Docling · alternativa ao Marker · alternativa ao PyMuPDF (MIT)
+Check formatting:
 
-Tópicos sugeridos para o repositório (*About → Topics*): `pdf` `pdf-to-markdown` `pdf-to-json` `pdf-parser` `pdf-extraction` `table-extraction` `layout-analysis` `document-parsing` `ocr` `apache-tika` `pdfium` `pdfjs` `rag` `llm` `markdown` `latex` `fastapi` `python` `open-source`
+```bash
+ruff check src tests
+ruff format --check src tests
+```
 
-## English
+Run the JavaScript parity tests:
 
-**PDF Text Extractor** turns PDFs into Markdown, JSON, Excel and Word while keeping the structure: reading order across columns, ruled/unruled/booktabs tables, formulas as LaTeX, cropped images of figures/tables/formulas and the bounding box of every block. It runs Apache Tika (metadata, tagged-PDF headings, OCR, DOCX/PPTX/XLSX/EPUB/HTML) in parallel with a PDFium layout engine, with no ML models and on CPU only. The same engine, ported to JavaScript on pdf.js, powers a [browser app](https://beatrizalmeidaf.github.io/pdf-text-extractor/) where files never leave your machine. Available as a Python library (`pip install pdf-text-api`), a CLI, a REST API (`docker compose up`) and a web app. MIT licensed.
+```bash
+npm install --prefix tests/js
+python tests/js/expected.py tests/js/out
+node tests/js/parity.mjs tests/js/out
+```
 
-## Licença
+Run the browser locally:
 
-[MIT](LICENSE) © Beatriz Almeida
+```bash
+python -m http.server -d web
+```
+
+---
+
+## Project structure
+
+```text
+pdf-text-extractor/
+├── src/pdf_text_api/     Python engine: layout (PDFium), Tika client, API, CLI
+├── web/                  Browser app (GitHub Pages) — engine.js is the JS port
+├── tests/                pytest + JS/Python parity test (tests/js)
+├── benchmarks/           dataset download + benchmark scripts
+├── Dockerfile
+├── docker-compose.yml
+└── pyproject.toml
+```
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+If you find a PDF that Papero parses incorrectly, a reproducible example is especially useful.
+
+Good issues include:
+
+* incorrect reading order
+* table detection failures
+* formula reconstruction problems
+* character encoding issues
+* OCR edge cases
+* browser/server parity differences
+* performance regressions
+
+---
+
+## Keywords
+
+PDF to Markdown · PDF to JSON · PDF to Word · PDF to Excel · PDF table extraction · PDF parser · document parsing · layout analysis · reading order · multi-column PDF · formula extraction · LaTeX · bounding boxes · OCR · Apache Tika · PDFium · pdf.js · RAG preprocessing · LLM document loader · Docling alternative · Marker alternative · PyMuPDF alternative (MIT)
+
+**Português:** converter PDF para Markdown, Word e Excel · extrair tabelas de PDF · extrair texto de PDF mantendo a formatação · extrair fórmulas de PDF · leitura de PDF em duas colunas · OCR de PDF escaneado · conversor de PDF no navegador sem upload · open source
+
+---
+
+## License
+
+MIT © Beatriz Almeida
+
+---
+
+<p align="center">
+  <strong>If Papero is useful to you, consider giving it a star.</strong>
+  <br>
+  <sub>It helps other developers discover the project.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor">
+    GitHub
+  </a>
+  ·
+  <a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+    Browser Demo
+  </a>
+</p>
+

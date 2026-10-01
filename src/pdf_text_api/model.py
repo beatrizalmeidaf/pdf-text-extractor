@@ -60,12 +60,24 @@ class Block:
     marker: str | None = None  # list marker ("•", "1.", "a)")
     image: ImageData | None = None  # crop of the region (figures, tables, formulas)
     caption: str | None = None
-    font_size: float | None = None
+    font_size: float | None = None  # height of the glyph boxes (pt), used for comparisons
     bold: bool = False
     lines: int = 1
     column: int = 0
     order: int = 0
     id: str = ""
+    # Layout, so an export (Word, HTML) can look like the page: alignment against the page's
+    # text area, indents in points, line spacing as a multiple of single spacing.
+    align: str | None = None  # "left" | "center" | "right" | "justify"
+    indent: float | None = None
+    first_line: float | None = None
+    line_spacing: float | None = None
+    pt: float | None = None  # real font size in points
+    font: str | None = None  # font family, e.g. "Times New Roman"
+    tracking: float | None = None  # extra space between letters (letter-spaced titles), pt
+    # Inline formatting when it varies inside the block: [{"text", "bold", "italic", "script"}]
+    runs: list[dict] | None = None
+    line_boxes: list | None = field(default=None, repr=False)  # internal: (x0, y0, x1, y1)
 
     def to_dict(self, embed_images: bool = True) -> dict:
         out: dict = {"id": self.id, "type": self.type, "order": self.order}
@@ -76,7 +88,20 @@ class Block:
             if value is not None:
                 out[key] = value
         if self.font_size:
-            out["style"] = {"size": round(self.font_size, 1), "bold": self.bold}
+            style = {"size": round(self.font_size, 1), "bold": self.bold}
+            if self.pt:
+                style["pt"] = round(self.pt, 1)
+            if self.font:
+                style["font"] = self.font
+            if self.tracking:
+                style["tracking"] = round(self.tracking, 1)
+            out["style"] = style
+        fmt = {k: getattr(self, k) for k in ("align", "indent", "first_line", "line_spacing")}
+        fmt = {k: (round(v, 1) if isinstance(v, float) else v) for k, v in fmt.items() if v}
+        if fmt:
+            out["format"] = fmt
+        if self.runs:
+            out["runs"] = self.runs
         if self.image is not None:
             out["image"] = self.image.to_dict(embed_images)
         return out

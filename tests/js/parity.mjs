@@ -25,7 +25,7 @@ const view = (doc) =>
     }));
 
 let failures = 0;
-for (const name of ["structured", "hard"]) {
+for (const name of ["structured", "hard", "declaration"]) {
   const data = readFileSync(join(dir, `${name}.pdf`));
   const { doc } = await extractDocument(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
   const js = view(doc);

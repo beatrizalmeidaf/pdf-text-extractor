@@ -3,23 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PDF para Markdown, JSON e Excel — Extrator de PDF open source</title>
+  <title>papero — PDF para Markdown, JSON, Word e Excel, com estrutura</title>
   <meta name="description" content="Converta PDF em Markdown, JSON, HTML, Word, Excel e CSV direto no navegador, sem enviar o arquivo. Mantém a ordem de leitura em colunas, extrai tabelas estruturadas, fórmulas em LaTeX, imagens e a posição de cada bloco. Open source, com API baseada em Apache Tika.">
   <meta name="keywords" content="pdf para markdown, pdf to markdown, pdf to json, extrair tabelas de pdf, pdf table extraction, pdf para excel, pdf para word, pdf parser, pdf text extraction, extrair texto de pdf, ocr, apache tika, rag, llm, document parsing, layout analysis, reading order, fórmulas latex, pdf.js, open source">
   <meta name="author" content="Beatriz Almeida">
   <meta name="theme-color" content="#c2410c">
   <link rel="canonical" href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="PDF para Markdown, tabelas e fórmulas — no navegador">
+  <meta property="og:title" content="papero — estrutura de documentos sem a stack pesada">
   <meta property="og:description" content="Extração estruturada de PDFs: ordem de leitura, tabelas, fórmulas em LaTeX, imagens e posições. Exporte para Markdown, JSON, Excel, Word, CSV ou HTML.">
   <meta property="og:url" content="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
   <meta name="twitter:card" content="summary">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c2410c'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='12' font-weight='700' fill='white' text-anchor='middle'%3EPDF%3C/text%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="apple-touch-icon" href="assets/icon.png">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    "name": "PDF Text Extractor",
+    "name": "papero",
+    "alternateName": "PDF Text Extractor",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Web, Windows, macOS, Linux",
     "description": "Extração estruturada de PDFs para Markdown, JSON, Excel, Word e CSV: ordem de leitura, tabelas, fórmulas, imagens e posições. Biblioteca Python, CLI, API REST (Apache Tika) e app web.",
@@ -46,9 +48,9 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="PDF Text Extractor — início">
-      <span class="brand-mark" aria-hidden="true">PDF</span>
-      <span>PDF Text Extractor<small>estrutura, tabelas e fórmulas</small></span>
+    <a class="brand" href="./" aria-label="papero — início">
+      <img class="brand-mark" src="assets/icon.svg" alt="" width="30" height="30">
+      <span>papero<small>estrutura de documentos, sem a stack pesada</small></span>
     </a>
     <nav>
       <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor#readme" target="_blank" rel="noopener">

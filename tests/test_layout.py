@@ -175,7 +175,9 @@ def test_tex_accents_are_composed(hard):
 def test_repeated_logo_is_page_furniture(hard):
     logos = [b for p in hard.pages[2:] for b in p.blocks if b.bbox and b.bbox[1] < 40]
     assert logos and all(b.type == "header" for b in logos)
-    assert hard.to_markdown().split("Teoria")[1].count("<!-- figura") == 1  # the Gantt, no logos
+    assert (
+        hard.to_markdown().split("Teoria")[1].count("<!-- figura") == 2
+    )  # Gantt + scatter plot, no logos
 
 
 def test_wrapped_list_item_without_hanging_indent(hard):
@@ -188,3 +190,41 @@ def test_two_tables_of_same_width_stay_apart(hard):
     types = [b.type for b in page.blocks if b.type not in ("header", "footer", "page_number")]
     assert types[-5:] == ["table", "paragraph", "figure", "paragraph", "table"]
     assert page.blocks[-1].rows[0] == ["Risco", "Probabilidade", "Impacto", "Mitigação"]
+
+
+# ----------------------------------------------------------------------------- letters & forms
+@pytest.fixture(scope="module")
+def letter(tmp_path_factory):
+    from fixtures import declaration_pdf
+
+    return extract(declaration_pdf(tmp_path_factory.mktemp("decl") / "decl.pdf"), tika=False)
+
+
+def test_white_alignment_text_is_dropped(letter):
+    texts = [b.text for b in letter.pages[0].blocks]
+    assert "( ) Matrícula trancada" in texts and "( ) Participante de mobilidade" in texts
+    assert sum("Situação do vínculo" in t for t in texts) == 1
+
+
+def test_one_and_a_half_spaced_paragraph_is_one_block(letter):
+    para = next(b for b in letter.pages[0].blocks if b.text.startswith("Atestamos"))
+    assert para.text.endswith("turno INTEGRAL.") and para.lines == 3
+    assert para.align == "justify" and para.first_line and para.line_spacing > 1.4
+    assert {"text": "FULANA DE TAL", "bold": True} in [
+        {"text": r["text"].strip(), "bold": r["bold"]} for r in para.runs
+    ]
+
+
+def test_intended_line_breaks_and_layout(letter):
+    blocks = letter.pages[0].blocks
+    head = next(b for b in blocks if b.text.startswith("UNIVERSIDADE"))
+    assert head.text.split("\n") == [
+        "UNIVERSIDADE EXEMPLO",
+        "PRÓ-REITORIA DE GRADUAÇÃO",
+        "CENTRO ACADÊMICO",
+    ]
+    title = next(b for b in blocks if "VÍNCULO" in b.text)
+    assert title.text == "DECLARAÇÃO DE VÍNCULO" and title.align == "center" and title.tracking
+    option = next(b for b in blocks if b.text.startswith("( ) Matr"))
+    assert option.indent and option.indent > 90
+    assert blocks[-1].align == "center" and blocks[-1].pt == 8.0

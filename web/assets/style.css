@@ -105,10 +105,7 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--surface); position: sticky; top: 0; z-index: 20;
 }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 650; letter-spacing: -0.01em; }
-.brand-mark {
-  width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink);
-  display: grid; place-items: center; font: 700 13px/1 var(--mono);
-}
+.brand-mark { width: 30px; height: 30px; display: block; }
 .brand small { display: block; font-weight: 450; color: var(--muted); font-size: 12px; letter-spacing: 0; }
 .topbar nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .topbar nav a, .icon-btn {

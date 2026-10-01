@@ -21,6 +21,7 @@ const RULE_MAX = 2.5;
 const EDGE_ZONE = 0.09;
 const TEXT_LIKE_CHARS = 15;
 const SCANNED_CHARS_PER_PAGE = 25;
+const HYPHEN_MARK = String.fromCharCode(2); // PDFium/pdf.js mark for an end-of-line hyphenation
 
 // ---------------------------------------------------------------- symbols (see symbols.py)
 const LIGATURES = { "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st" };
@@ -194,7 +195,7 @@ function segmentsLatex(segs) {
 }
 
 class Span {
-  constructor(chars, fonts) {
+  constructor(chars, fonts, rotated = false) {
     this.chars = chars;
     this.fonts = fonts;
     this.x0 = Math.min(...chars.map((c) => c.x0));
@@ -208,7 +209,10 @@ class Span {
     this.italic = f.filter((x) => x.italic).length > n * 0.6;
     this.mono = f.filter((x) => x.mono).length > n * 0.8;
     this.math = f.filter((x) => x.math).length / n;
-    this.segments = segmentsOf(chars, this.size);
+    // Rotated text (side stamps, axis titles): stream order, no baseline logic.
+    this.segments = rotated
+      ? [["n", chars.map((c, i) => (c.space && i ? " " : "") + c.c).join("")]]
+      : segmentsOf(chars, this.size);
     this.text = segmentsText(this.segments);
   }
   get width() { return this.x1 - this.x0; }
@@ -433,11 +437,14 @@ function readingOrder(items, minGap) {
   const bands = bandsOf(items);
   if (bands.length === 1) return [[...items].sort((a, b) => a.x0 - b.x0)];
   const groups = [bands[0]];
-  for (const band of bands.slice(1)) {
+  for (let k = 1; k < bands.length; k++) {
+    const band = bands[k];
     const last = groups[groups.length - 1];
     const union = [...last, ...band];
+    // Look two bands ahead: a short heading on a column ("Abstract") proves itself with the lines below.
+    const ahead = bands.slice(k + 1, k + 3).flat();
     if (tableRow(band) && !tableRow(last.slice(-1))) groups.push(band);
-    else if (splitColumns(union, minGap)) groups[groups.length - 1] = union;
+    else if (splitColumns(union, minGap) || (ahead.length && splitColumns([...union, ...ahead], minGap))) groups[groups.length - 1] = union;
     else groups.push(band);
   }
   const out = [];
@@ -612,6 +619,30 @@ function looksUnruledRows(spans, ys) {
   }
   return false;
 }
+// Row edges when rules don't separate every row (booktabs): decided inside each interval
+// between rules — gaps of two sizes: only the big ones split rows; a line filling far fewer
+// columns than the one above, set tight under it, continues its cells.
+function logicalRows(spans, ys, xs) {
+  const edges = [...ys];
+  for (let k = 0; k < ys.length - 1; k++) {
+    const ins = spans.filter((s) => ys[k] <= (s.y0 + s.y1) / 2 && (s.y0 + s.y1) / 2 <= ys[k + 1]);
+    if (ins.length < 2) continue;
+    const bands = bandsOf(ins.map((s) => atom("span", s.x0, s.y0, s.x1, s.y1, { span: s })));
+    if (bands.length < 2) continue;
+    const tops = bands.map((b) => Math.min(...b.map((a) => a.y0)));
+    const bottoms = bands.map((b) => Math.max(...b.map((a) => a.y1)));
+    const gaps = tops.slice(1).map((t, i) => t - bottoms[i]);
+    const h = median(bottoms.map((b, i) => b - tops[i]));
+    const threshold = Math.min(...gaps) + Math.max(1.5, h * 0.3);
+    const bimodal = gaps.length >= 2 && Math.max(...gaps) > threshold;
+    const cols = bands.map((b) => new Set(b.map((a) => bucket((a.x0 + a.x1) / 2, xs))).size);
+    gaps.forEach((gap, i) => {
+      const split = bimodal ? gap > threshold : !(cols[i + 1] < cols[i] * 0.6 && gap < h * 0.6);
+      if (split) edges.push((bottoms[i] + tops[i + 1]) / 2);
+    });
+  }
+  return [...new Set(cluster(edges, 2))];
+}
 function detectRuledTables(spans, g) {
   const tables = [];
   const used = new Set();
@@ -627,10 +658,7 @@ function detectRuledTables(spans, g) {
     if (!realV) xs = projectionColumns(ins, x0, x1);
     // Trust the rules of a full grid (cells may wrap); split by text bands only when rules
     // just frame the table (booktabs) or a rule row clearly holds several rows.
-    if (!realV && (ys.length <= 4 || looksUnruledRows(ins, ys))) {
-      const bands = bandRows(ins);
-      if (bands.length > ys.length) ys = [...new Set(cluster([...ys, ...bands], 2))];
-    }
+    if (!realV) ys = logicalRows(ins, ys, xs);
     const block = tableBlock(bbox, gridRows(ins.flatMap(wordsOf), xs, ys));
     if (!block) continue;
     tables.push(block);
@@ -710,8 +738,30 @@ function clusterBoxes(boxes, gap) {
   return bs;
 }
 // Vector charts: clusters of non-rule ink grown to take in their axes, ticks and legend frame.
-function chartRegions(g, width, height) {
-  const boxes = clusterBoxes(g.ink, 6).filter((b) => area(b) > width * height * 0.01);
+// Rectangles of rules holding many vector marks and little text: the axes of a plot whose
+// marks are too sparse to cluster (scatter plots). A table is the opposite.
+function plotFrames(g, spans) {
+  const H = mergeRules(g.hrules), V = mergeRules(g.vrules);
+  if (V.length > 200 || g.ink.length < 8) return [];
+  const frames = [];
+  for (let i = 0; i < V.length; i++)
+    for (const right of V.slice(i + 1)) {
+      const left = V[i];
+      if (right[0] - left[0] < 30 || Math.abs(left[1] - right[1]) > 3 || Math.abs(left[2] - right[2]) > 3) continue;
+      const x0 = left[0], x1 = right[0], y0 = Math.max(left[1], right[1]), y1 = Math.min(left[2], right[2]);
+      const edge = (y) => H.some((h) => Math.abs(h[0] - y) <= 3 && h[1] <= x0 + 3 && h[2] >= x1 - 3);
+      if (!edge(y0) || !edge(y1) || y1 - y0 < 30) continue;
+      const box = [x0, y0, x1, y1];
+      const marks = g.ink.filter((b) => inside(b, box, 1)).length;
+      const texts = spans.filter((s) => inside([s.x0, s.y0, s.x1, s.y1], box, 1)).length;
+      if (marks >= 8 && marks >= texts * 3) frames.push(box);
+    }
+  return frames;
+}
+function chartRegions(g, width, height, spans = []) {
+  let boxes = clusterBoxes(g.ink, 6).filter((b) => area(b) > width * height * 0.01);
+  const frames = plotFrames(g, spans);
+  if (frames.length) boxes = clusterBoxes([...boxes, ...frames], 2);
   const rules = [...g.hrules.map(([y, x0, x1]) => [x0, y, x1, y]), ...g.vrules.map(([x, y0, y1]) => [x, y0, x, y1])];
   for (const box of boxes) {
     for (let it = 0; it < 4; it++) {
@@ -741,12 +791,19 @@ function withoutRulesIn(g, boxes) {
     vrules: g.vrules.filter((v) => free([v[0], v[1], v[0], v[2]])),
   };
 }
-function labelLike(s) {
+// Labels of a chart (tick values, axis titles, legend rows): no bigger than the body text and
+// not bold; beside the plot only short texts (never a line of the neighbouring column).
+function labelOf(s, box, body) {
   const t = s.text.trim();
-  return !!t && t.length <= 30 && t.split(/\s+/).length <= 4 && !CAPTION.test(t) && !listStart(t) &&
-    !(t.endsWith(".") && !/^[\d.,]+$/.test(t.slice(0, -1)));
+  if (!t || s.bold || s.size > body * 1.05 || CAPTION.test(t) || listStart(t)) return false;
+  if (t.endsWith(".") && !/^[\d.,]+$/.test(t.slice(0, -1))) return false;
+  const m = Math.max(s.size * 3.5, 18);
+  if (!inside([s.x0, s.y0, s.x1, s.y1], [box[0] - m, box[1] - m, box[2] + m, box[3] + m])) return false;
+  const beside = s.x1 <= box[0] + 2 || s.x0 >= box[2] - 2;
+  if (beside) return t.length <= 12 || s.height > s.width;
+  return t.length <= 60 && t.split(/\s+/).length <= 8 && s.width <= (box[2] - box[0]) * 1.1;
 }
-function detectFigures(g, spans, tables, width, height, charts) {
+function detectFigures(g, spans, tables, width, height, charts, body = 10) {
   const raster = g.images.map((b) => [...b]);
   charts = charts || chartRegions(g, width, height);
   const boxes = clusterBoxes([...raster, ...charts.map((b) => [...b])], 2);
@@ -767,11 +824,10 @@ function detectFigures(g, spans, tables, width, height, charts) {
       ins = [];
     } else if (!isRaster) {
       // Tick values and axis titles sit just outside the plot area: take them in.
-      for (let pass = 0; pass < 2; pass++)
+      for (let pass = 0; pass < 3; pass++) // axis title, then the legend rows under it
         for (const s of remaining) {
-          if (ins.includes(s) || !labelLike(s)) continue;
-          const m = Math.max(s.size * 3.5, 18);
-          if (inside([s.x0, s.y0, s.x1, s.y1], [box[0] - m, box[1] - m, box[2] + m, box[3] + m])) {
+          if (ins.includes(s) || !labelOf(s, box, body)) continue;
+          {
             ins.push(s);
             box = [Math.min(box[0], s.x0), Math.min(box[1], s.y0), Math.max(box[2], s.x1), Math.max(box[3], s.y1)];
           }
@@ -794,7 +850,9 @@ class Line {
     this.y1 = Math.max(...spans.map((s) => s.y1));
     this.text = spans.map((s) => s.text.trim()).filter(Boolean).join(" ");
     this.size = spans.reduce((a, b) => (b.chars.length > a.chars.length ? b : a)).size;
-    this.bold = spans.every((s) => s.bold);
+    // By glyph: a line with a few words in bold is not a bold line.
+    const all = spans.flatMap((s) => s.chars.map((c) => s.fonts[c.font].bold));
+    this.bold = all.filter(Boolean).length >= all.length * 0.9;
     this.mono = spans.every((s) => s.mono);
     const n = sum(spans.map((s) => s.chars.length));
     this.math = sum(spans.map((s) => s.math * s.chars.length)) / Math.max(n, 1);
@@ -804,6 +862,12 @@ class Line {
     const out = [];
     this.spans.forEach((s, i) => { if (i) out.push(["n", " "]); out.push(...s.segments); });
     return out;
+  }
+  firstWordWidth() {
+    const chars = this.spans.flatMap((s) => s.chars);
+    let end = chars.findIndex((c, i) => i > 0 && c.space);
+    if (end < 0) end = chars.length;
+    return chars[end - 1].x1 - chars[0].x0;
   }
 }
 function listStart(text) {
@@ -822,20 +886,121 @@ function formulaLike(line) {
   return line.math >= 0.4 || score >= 0.22 || (line.hasScripts && score >= 0.1) ||
     (text.includes("=") && words.length <= 1 && /[\p{L}\p{N}]/u.test(compact));
 }
-function joinLines(lines) {
+const NEWLINE = "\n"; // a line break the author made on purpose, kept inside a paragraph
+// A break is intentional when the next line's first word would have fitted on this one.
+const hardBreak = (prev, nxt, edges) =>
+  (edges.get(prev) ?? prev.x1) - prev.x1 > nxt.firstWordWidth() + Math.max(prev.size, 4) * 0.6;
+// Right edge of each line's text column: the furthest any line reaching over it goes.
+function rightEdges(lines) {
+  const out = new Map();
+  for (const a of lines) {
+    let edge = a.x1;
+    for (const b of lines) if (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5) edge = Math.max(edge, b.x1);
+    out.set(a, edge);
+  }
+  return out;
+}
+function joinLines(lines, edges = new Map()) {
   let text = "";
+  let prev = null;
   for (const ln of lines) {
     const t = ln.text.trim();
     if (!text) text = t;
     else if (text.endsWith("-") && text.length > 1 && /\p{L}/u.test(text[text.length - 2]) && /^\p{Ll}/u.test(t)) text = text.slice(0, -1) + t;
+    else if (prev && edges.size && hardBreak(prev, ln, edges)) text += NEWLINE + t;
     else text += " " + t;
+    prev = ln;
   }
   return text;
+}
+// Gap between two lines of the same text (overlapping, same size), else null.
+function lineGap(a, b) {
+  const size = Math.max(a.size, 4);
+  const gap = b.y0 - a.y1;
+  const overlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  return overlap > 0 && Math.abs(a.size - b.size) <= size * 0.15 && gap > -size * 0.5 && gap < size * 2.5 ? gap : null;
+}
+// A line break inside a paragraph: a small gap, or one equal to the neighbouring lines'
+// spacing (1.5- and double-spaced documents).
+function sameLeading(gap, size, group, lines, idx) {
+  if (gap <= -size * 0.5) return false;
+  if (gap <= size * PARA_GAP_EM) return true;
+  if (gap > size * 1.6) return false;
+  const near = [];
+  if (group.length >= 2) near.push(lineGap(group[group.length - 2], group[group.length - 1]));
+  if (idx + 1 < lines.length) near.push(lineGap(lines[idx], lines[idx + 1]));
+  return near.some((g) => g !== null && Math.abs(g - gap) <= Math.max(1.5, gap * 0.2));
+}
+// Inline formatting (bold / italic / super- and subscript runs), joined like joinLines.
+function runsOf(group, edges) {
+  const runs = [];
+  const add = (text, bold, italic, script) => {
+    const last = runs[runs.length - 1];
+    if (last && ((last.bold === bold && last.italic === italic && last.script === script) || !text.trim())) last.text += text;
+    else runs.push({ text, bold, italic, script });
+  };
+  let prev = null;
+  for (const ln of group) {
+    if (prev && runs.length) {
+      const last = runs[runs.length - 1];
+      const first = ln.text.trim()[0] || "";
+      if (last.text.endsWith("-") && last.text.length > 1 && /\p{L}/u.test(last.text[last.text.length - 2]) && /\p{Ll}/u.test(first)) last.text = last.text.slice(0, -1);
+      else last.text += hardBreak(prev, ln, edges) ? NEWLINE : " ";
+    }
+    ln.spans.forEach((span, k) => {
+      if (k && runs.length) runs[runs.length - 1].text += " ";
+      const fonts = span.fonts;
+      let piece = [];
+      const flushPiece = () => {
+        if (!piece.length) return;
+        const f = fonts[piece[0].font];
+        const last = runs[runs.length - 1];
+        const lead = piece[0].space && last && !/[ \n]$/.test(last.text) ? " " : "";
+        segmentsOf(piece, span.size).forEach(([kind, text], i) =>
+          add((i === 0 ? lead : "") + text, !!f.bold, !!f.italic, kind === "n" ? null : kind === "sup" ? "super" : "sub"));
+        piece = [];
+      };
+      for (const ch of span.chars) {
+        if (piece.length) {
+          const a = fonts[piece[0].font], b = fonts[ch.font];
+          if (!!a.bold !== !!b.bold || !!a.italic !== !!b.italic) flushPiece();
+        }
+        piece.push(ch);
+      }
+      flushPiece();
+    });
+    prev = ln;
+  }
+  const out = runs.filter((r) => r.text);
+  if (out.length) {
+    out[0].text = out[0].text.trimStart();
+    out[out.length - 1].text = out[out.length - 1].text.trimEnd();
+  }
+  return out;
+}
+function stripPrefix(runs, prefix) {
+  let n = prefix.length;
+  for (const r of runs) {
+    if (n <= 0) break;
+    const cut = Math.min(n, r.text.length);
+    r.text = r.text.slice(cut);
+    n -= cut;
+  }
+  const out = runs.filter((r) => r.text);
+  if (out.length) out[0].text = out[0].text.trimStart();
+  return out;
+}
+// "ABCDEF+TimesNewRomanPS-BoldMT" -> "Times New Roman": what Word calls the font.
+function family(name) {
+  let base = name.split("+").pop().split(/[-,]/)[0].replace(/(PSMT|PS|MT)$/, "");
+  base = base.replace(/(Bold|Italic|Oblique|Regular|Semibold|SemiBold|Black|Light|Medium|Book)+$/, "");
+  return base.replace(/([a-z])([A-Z])/g, "$1 $2").trim() || name;
 }
 function linesToBlocks(lines) {
   const blocks = [];
   let group = [];
   let kind = "paragraph";
+  const edges = lines.length > 1 ? rightEdges(lines) : new Map();
   const flush = () => {
     if (!group.length) return;
     const x0 = Math.min(...group.map((l) => l.x0)), y0 = Math.min(...group.map((l) => l.y0));
@@ -855,13 +1020,28 @@ function linesToBlocks(lines) {
       }
       b = newBlock("formula", [x0, y0, x1, y1], { text: segmentsText(segs).trim(), latex: segmentsLatex(segs), number });
     } else {
-      const text = joinLines(group);
+      const text = joinLines(group, edges);
       b = newBlock(kind, [x0, y0, x1, y1], { text });
+      let runs = runsOf(group, edges);
       if (kind === "list_item") {
         b.marker = listStart(text);
-        if (b.marker) b.text = text.trimStart().slice(b.marker.length).trim();
+        if (b.marker) {
+          b.text = text.trimStart().slice(b.marker.length).trim();
+          runs = stripPrefix(runs, b.marker);
+        }
       }
+      if (runs.length > 1 || (runs.length && (runs[0].bold || runs[0].italic || runs[0].script))) b.runs = runs;
+      b.line_boxes = group.map((l) => [l.x0, l.y0, l.x1, l.y1]);
     }
+    const glyphFonts = group.flatMap((l) => l.spans.flatMap((s) => s.chars.map((c) => [s.fonts[c.font], c.pt])));
+    const pts = glyphFonts.map(([, pt]) => pt).filter(Boolean);
+    if (pts.length) b.pt = Math.round(median(pts) * 10) / 10;
+    // Letter spacing of a "T Í T U L O": the usual gap between letters of the same word.
+    const gaps = group.flatMap((l) => l.spans.flatMap((s) => s.chars.slice(1).filter((c) => !c.space).map((c) => c.x0 - s.chars[s.chars.indexOf(c) - 1].x1)));
+    if (gaps.length >= 4 && median(gaps) > size * 0.08) b.tracking = Math.round(median(gaps) * 10) / 10;
+    const names = new Map();
+    for (const [f] of glyphFonts) if (f.name) names.set(f.name, (names.get(f.name) || 0) + 1);
+    if (names.size) b.font = family([...names.entries()].sort((a, c) => c[1] - a[1])[0][0]);
     b.font_size = size;
     b.bold = group.every((l) => l.bold);
     b.lines = group.length;
@@ -869,9 +1049,9 @@ function linesToBlocks(lines) {
     group = [];
     kind = "paragraph";
   };
-  for (const ln of lines) {
+  lines.forEach((ln, idx) => {
     const text = ln.text;
-    if (!text.trim()) continue;
+    if (!text.trim()) return;
     let thisKind = "paragraph";
     if (ln.mono && text.length > 1) thisKind = "code";
     else if (formulaLike(ln)) thisKind = "formula";
@@ -882,7 +1062,7 @@ function linesToBlocks(lines) {
       const gap = ln.y0 - prev.y1;
       const overlap = Math.min(prev.x1, ln.x1) - Math.max(prev.x0, ln.x0);
       const sameStyle = Math.abs(ln.size - prev.size) <= size * 0.15 && ln.bold === prev.bold;
-      let cont = gap <= size * PARA_GAP_EM && gap > -size * 0.5 && overlap > 0 && sameStyle;
+      let cont = sameLeading(gap, size, group, lines, idx) && overlap > 0 && sameStyle;
       if (kind === "code") cont = thisKind === "code" && gap <= size * 1.2 && overlap > -size;
       else if (kind === "formula") cont = thisKind === "formula" && gap <= size * 0.9;
       else if (["list_item", "formula", "code"].includes(thisKind)) cont = false;
@@ -900,9 +1080,37 @@ function linesToBlocks(lines) {
     }
     if (!group.length) kind = thisKind;
     group.push(ln);
-  }
+  });
   flush();
   return blocks;
+}
+// Alignment, indents and line spacing of each text block against the page's text area.
+function layoutFormat(page) {
+  const text = page.blocks.filter((b) => b.line_boxes && !FURNITURE.has(b.type));
+  if (!text.length) return;
+  const left = Math.min(...text.map((b) => b.bbox[0])), right = Math.max(...text.map((b) => b.bbox[2]));
+  const width = Math.max(right - left, 1), mid = (left + right) / 2, tol = Math.max(3, width * 0.012);
+  for (const b of text) {
+    const boxes = b.line_boxes;
+    const x0s = boxes.map((l) => l[0]), x1s = boxes.map((l) => l[2]);
+    const centred = x0s.every((a, i) => Math.abs((a + x1s[i]) / 2 - mid) <= tol * 1.5);
+    let align = "left";
+    if (boxes.length >= 2 && x1s.slice(0, -1).every((e) => Math.abs(e - right) <= tol) && Math.min(...x0s) <= left + tol) align = "justify";
+    else if (centred && Math.min(...x0s) > left + width * 0.05) align = "center";
+    else if (x1s.every((e) => Math.abs(e - right) <= tol) && Math.min(...x0s) > left + width * 0.3) align = "right";
+    const fmt = { align };
+    if (align === "left" || align === "justify") {
+      const base = boxes.length > 1 ? Math.min(...x0s.slice(1)) : x0s[0];
+      if (base - left > tol) fmt.indent = Math.round((base - left) * 10) / 10;
+      if (boxes.length > 1 && Math.abs(x0s[0] - base) > tol) fmt.first_line = Math.round((x0s[0] - base) * 10) / 10;
+    }
+    if (boxes.length >= 2 && b.pt) {
+      const pitch = median(boxes.slice(1).map((l, k) => l[3] - boxes[k][3]));
+      const multiple = pitch / (b.pt * 1.15);
+      if (multiple > 1.2) fmt.line_spacing = Math.round(multiple * 100) / 100;
+    }
+    b.format = fmt;
+  }
 }
 
 function newBlock(type, bbox, extra = {}) {
@@ -932,6 +1140,132 @@ async function fontInfo(page, fontName, style) {
   };
 }
 
+// Every glyph from the operator list, run through the PDF text state machine: exact
+// position (not spread evenly over a text item), real font size, and fill colour — so white
+// text on white paper can be told apart from what the reader sees. Mirrors read_chars() in
+// layout.py, which gets the same from PDFium.
+function readGlyphs(page, viewport, ops) {
+  const O = pdfjsLib.OPS;
+  const fonts = [];
+  const fontIndex = new Map();
+  const chars = [], rotated = [];
+  let ctm = viewport.transform.slice();
+  let st = { key: null, size: 0, cs: 0, ws: 0, hs: 1, lead: 0, rise: 0, mode: 0, fill: [0, 0, 0] };
+  const stack = [];
+  let tm = IDENTITY.slice(), tlm = IDENTITY.slice();
+  let space = 0, newline = false;
+
+  const font = () => {
+    let fi = fontIndex.get(st.key);
+    if (fi === undefined) {
+      let f = null;
+      try { if (page.commonObjs.has(st.key)) f = page.commonObjs.get(st.key); } catch { /* unresolved */ }
+      const name = f?.name || st.key || "";
+      const low = name.toLowerCase().split("+").pop();
+      fi = fonts.length;
+      fontIndex.set(st.key, fi);
+      fonts.push({
+        name, obj: f,
+        bold: !!f?.bold || !!f?.black || /bold|black|heavy|semibold|demi/.test(low),
+        italic: !!f?.italic || /italic|oblique/.test(low),
+        math: isMathFont(low),
+        mono: /mono|courier|consol|menlo|inconsolata/.test(low),
+      });
+    }
+    return fi;
+  };
+  const moveText = (tx, ty) => {
+    tlm = mul(tlm, [1, 0, 0, 1, tx, ty]);
+    tm = tlm.slice();
+    if (ty) newline = true;
+  };
+  const show = (items) => {
+    const fi = font();
+    const f = fonts[fi].obj;
+    const fm = f?.fontMatrix || [0.001, 0, 0, 0.001, 0, 0];
+    const asc = f?.ascent || 0.8, desc = f?.descent || -0.2;
+    const white = Math.min(...st.fill) >= 250 && (st.mode === 0 || st.mode === 4);
+    for (const it of items) {
+      if (typeof it === "number") { // TJ spacing, thousandths of an em
+        tm = mul(tm, [1, 0, 0, 1, (-it / 1000) * st.size * st.hs, 0]);
+        continue;
+      }
+      if (!it) continue;
+      if (Array.isArray(it)) { show(it); continue; }
+      const w0 = (it.width || 0) * fm[0];
+      const trm = mul(ctm, mul(tm, [st.size * st.hs, 0, 0, st.size, 0, st.rise]));
+      const uni = it.unicode || "";
+      if (it.isSpace || !uni.trim()) {
+        space = 2;
+      } else {
+        const parts = [...uni].map((g) => normalizeChar(g, fonts[fi].name)).join("");
+        const glyphs = [...parts].filter((g) => g && !/\s/.test(g));
+        glyphs.forEach((g, k) => {
+          const a = (w0 * k) / glyphs.length, b = (w0 * (k + 1)) / glyphs.length;
+          const pts = [apply(trm, a, desc), apply(trm, b, desc), apply(trm, a, asc), apply(trm, b, asc)];
+          const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+          const ch = {
+            c: g === HYPHEN_MARK ? "-" : g, x0: Math.min(...xs), x1: Math.max(...xs),
+            y0: Math.min(...ys), y1: Math.max(...ys), font: fi, space, newline, white,
+            pt: st.size * Math.sqrt(Math.abs(trm[0] * trm[3] - trm[1] * trm[2])) / Math.max(st.size, 1e-6),
+          };
+          if (ch.y1 - ch.y0 > 0.1) (Math.abs(trm[1]) > Math.abs(trm[0]) * 0.2 ? rotated : chars).push(ch);
+          space = 0;
+          newline = false;
+        });
+      }
+      const tx = (w0 * st.size + st.cs + (it.isSpace ? st.ws : 0)) * st.hs;
+      tm = mul(tm, [1, 0, 0, 1, tx, 0]);
+    }
+  };
+  const color = (fn, args) => {
+    if (fn === O.setFillRGBColor) {
+      const c = args[0];
+      st.fill = typeof c === "string" ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : [...args].map((v) => (v <= 1 ? v * 255 : v));
+    } else if (fn === O.setFillGray) st.fill = [args[0] * 255, args[0] * 255, args[0] * 255];
+    else if (fn === O.setFillCMYKColor) {
+      const [c, m, y, k] = args;
+      st.fill = [255 * (1 - c) * (1 - k), 255 * (1 - m) * (1 - k), 255 * (1 - y) * (1 - k)];
+    }
+  };
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i], args = ops.argsArray[i];
+    switch (fn) {
+      case O.save: stack.push({ ctm: ctm.slice(), st: { ...st, fill: [...st.fill] } }); break;
+      case O.restore: if (stack.length) ({ ctm, st } = stack.pop()); break;
+      case O.transform: ctm = mul(ctm, args); break;
+      case O.paintFormXObjectBegin: stack.push({ ctm: ctm.slice(), st: { ...st, fill: [...st.fill] } }); if (args[0]) ctm = mul(ctm, args[0]); break;
+      case O.paintFormXObjectEnd: if (stack.length) ({ ctm, st } = stack.pop()); break;
+      case O.beginText: tm = IDENTITY.slice(); tlm = IDENTITY.slice(); break;
+      case O.setFont: st.key = args[0]; st.size = args[1]; break;
+      case O.setTextMatrix: tlm = (args.length === 6 ? args : args[0]).slice(0, 6); tm = tlm.slice(); newline = true; break;
+      case O.moveText: moveText(args[0], args[1]); break;
+      case O.setLeadingMoveText: st.lead = -args[1]; moveText(args[0], args[1]); break;
+      case O.nextLine: moveText(0, -st.lead); break;
+      case O.setLeading: st.lead = args[0]; break;
+      case O.setCharSpacing: st.cs = args[0]; break;
+      case O.setWordSpacing: st.ws = args[0]; break;
+      case O.setHScale: st.hs = args[0] / 100; break;
+      case O.setTextRise: st.rise = args[0]; break;
+      case O.setTextRenderingMode: st.mode = args[0]; break;
+      case O.showText: case O.showSpacedText: show(args[0]); break;
+      case O.nextLineShowText: moveText(0, -st.lead); show(args[0]); break;
+      case O.nextLineSetSpacingShowText: st.ws = args[0]; st.cs = args[1]; moveText(0, -st.lead); show(args[2]); break;
+      default: color(fn, args);
+    }
+  }
+  return { chars, rotated, fonts };
+}
+
+// White text on white paper is invisible: generators use it to align things. White on a
+// coloured cell or an image is real text. (Unlike PDFium, pdf.js keeps glyphs that overlap,
+// so dropping the white ones never removes a visible one.)
+function visibleOnly(list, g) {
+  const under = [...g.fills, ...g.images];
+  return list.filter((c) => !c.white || under.some((b) => b[0] <= (c.x0 + c.x1) / 2 && (c.x0 + c.x1) / 2 <= b[2] && b[1] <= (c.y0 + c.y1) / 2 && (c.y0 + c.y1) / 2 <= b[3]));
+}
+
+
 async function readChars(page, viewport, textContent) {
   const fonts = [];
   const fontIndex = new Map();
@@ -957,18 +1291,26 @@ async function readChars(page, viewport, textContent) {
     const isRotated = Math.abs(tx[1]) > Math.abs(tx[0]) * 0.2;
     const st = textContent.styles[it.fontName] || {};
     const asc = st.ascent || 0.8, desc = st.descent || -0.2;
-    const base = tx[5];
-    const top = base - asc * fh, bottom = base - desc * fh;
+    // Glyph boxes follow the text's own axes, so rotated text (the arXiv side stamp, axis
+    // titles) gets a tall narrow box instead of a horizontal one across the page.
+    const along = Math.hypot(tx[0], tx[1]) || 1;
+    const ux = tx[0] / along, uy = tx[1] / along; // reading direction (device space)
+    const vx = tx[2] / fh, vy = tx[3] / fh; // "up" for the glyphs
     const glyphs = [...it.str];
     // TeX accents: pdf.js turns the pen's step back after "˜" into a fake space ("˜ o e").
     if (glyphs.length > 2 && SPACING_ACCENTS[glyphs[0]] && glyphs[1] === " ") glyphs.splice(1, 1);
     const w = it.width * viewport.scale;
+    const n = glyphs.length;
     glyphs.forEach((g, k) => {
       const c = normalizeChar(g, fonts[fi].name);
       if (!c || /\s/.test(c)) { space = 2; return; }
+      const sx = tx[4] + ux * (w * k) / n, sy = tx[5] + uy * (w * k) / n;
+      const ex = sx + ux * w / n, ey = sy + uy * w / n;
+      const xs = [sx + vx * fh * desc, sx + vx * fh * asc, ex + vx * fh * desc, ex + vx * fh * asc];
+      const ys = [sy + vy * fh * desc, sy + vy * fh * asc, ey + vy * fh * desc, ey + vy * fh * asc];
       const ch = {
-        c: c === "\u0002" ? "-" : c, x0: tx[4] + (w * k) / glyphs.length, x1: tx[4] + (w * (k + 1)) / glyphs.length,
-        y0: top, y1: bottom, font: fi, space, newline,
+        c: c === HYPHEN_MARK ? "-" : c, x0: Math.min(...xs), x1: Math.max(...xs),
+        y0: Math.min(...ys), y1: Math.max(...ys), font: fi, space, newline,
       };
       (isRotated ? rotated : chars).push(ch);
       space = 0;
@@ -979,9 +1321,9 @@ async function readChars(page, viewport, textContent) {
   return { chars, rotated, fonts };
 }
 
-async function readGraphics(page, viewport, width, height) {
-  const g = { hrules: [], vrules: [], ink: [], images: [] };
-  const ops = await page.getOperatorList();
+async function readGraphics(page, viewport, width, height, ops) {
+  const g = { hrules: [], vrules: [], ink: [], images: [], fills: [] };
+  ops = ops || (await page.getOperatorList());
   const O = pdfjsLib.OPS;
   const pageArea = width * height;
   let ctm = viewport.transform.slice();
@@ -996,8 +1338,9 @@ async function readGraphics(page, viewport, width, height) {
   const addBoxRules = (b) => {
     const [x0, y0, x1, y1] = b;
     const w = x1 - x0, h = y1 - y0;
-    if (w <= RULE_MAX && h > 3) g.vrules.push([(x0 + x1) / 2, y0, y1]);
-    else if (h <= RULE_MAX && w > 3) g.hrules.push([(y0 + y1) / 2, x0, x1]);
+    // Thick rules (Word borders, a 0.5 mm booktabs toprule) are flat bars, not boxes.
+    if ((w <= RULE_MAX && h > 3) || (w <= 4.5 && h > w * 6)) g.vrules.push([(x0 + x1) / 2, y0, y1]);
+    else if ((h <= RULE_MAX && w > 3) || (h <= 4.5 && w > h * 6)) g.hrules.push([(y0 + y1) / 2, x0, x1]);
     else if (w * h < pageArea * 0.6) {
       g.hrules.push([y0, x0, x1], [y1, x0, x1]);
       g.vrules.push([x0, y0, y1], [x1, y0, y1]);
@@ -1006,6 +1349,7 @@ async function readGraphics(page, viewport, width, height) {
   const paint = (path, fill, stroke) => {
     if (!path || (!fill && !stroke)) return;
     if (fill && !stroke && path.white) return;
+    if (fill && !path.white) g.fills.push(path.box); // coloured area: white text on it is real
     const { box, segs, curves, rects } = path;
     if (box[2] < -5 || box[3] < -5 || box[0] > width + 5 || box[1] > height + 5) return;
     const w = box[2] - box[0], h = box[3] - box[1];
@@ -1092,22 +1436,28 @@ async function analyzePage(pdf, number, opts) {
   const page = await pdf.getPage(number);
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
   const width = viewport.width, height = viewport.height;
-  const g = await readGraphics(page, viewport, width, height); // also resolves fonts
-  const textContent = await page.getTextContent({ includeMarkedContent: false });
-  const { chars, rotated, fonts } = await readChars(page, viewport, textContent);
+  const ops = await page.getOperatorList(); // also resolves the fonts
+  const g = await readGraphics(page, viewport, width, height, ops);
+  let { chars, rotated, fonts } = readGlyphs(page, viewport, ops);
+  if (!chars.length && !rotated.length) {
+    // No glyphs in the operator list (unusual fonts): fall back to pdf.js text items.
+    ({ chars, rotated, fonts } = await readChars(page, viewport, await page.getTextContent()));
+  }
+  chars = visibleOnly(chars, g);
+  rotated = visibleOnly(rotated, g);
   let spans = chars.length ? buildSpans(chars, fonts) : [];
-  const rotSpans = groupRotated(rotated).map((grp) => new Span(grp, fonts));
+  const rotSpans = groupRotated(rotated).map((grp) => new Span(grp, fonts, true));
   const sizes = new Map();
   for (const c of chars) { const k = Math.round(charSize(c) * 2) / 2; sizes.set(k, (sizes.get(k) || 0) + 1); }
   let body = 10, bestN = 0;
   for (const [k, n] of sizes) if (n > bestN) [body, bestN] = [k, n];
 
   // Charts first: their axes, ticks and legend frame are rules that must not form a table.
-  const charts = chartRegions(g, width, height);
+  const charts = chartRegions(g, width, height, spans);
   let tables = [];
   if (opts.tables) [tables, spans] = detectRuledTables(spans, withoutRulesIn(g, charts));
   let figures;
-  [figures, spans] = detectFigures(g, [...spans, ...rotSpans], tables, width, height, charts);
+  [figures, spans] = detectFigures(g, [...spans, ...rotSpans], tables, width, height, charts, body);
 
   const atoms = spans.map((s) => atom("span", s.x0, s.y0, s.x1, s.y1, { span: s }));
   for (const b of [...tables, ...figures]) atoms.push(atom(b.type, ...b.bbox, { block: b }));
@@ -1140,8 +1490,9 @@ function groupRotated(chars) {
   const groups = [];
   for (const ch of chars) {
     const last = groups.length ? groups[groups.length - 1][groups[groups.length - 1].length - 1] : null;
-    if (last && Math.abs((ch.x0 + ch.x1) / 2 - (last.x0 + last.x1) / 2) < charSize(ch) * 2 &&
-        Math.abs((ch.y0 + ch.y1) / 2 - (last.y0 + last.y1) / 2) < charSize(ch) * 2) groups[groups.length - 1].push(ch);
+    const d = Math.max(charSize(ch), ch.x1 - ch.x0) * 3; // rotated glyph: its box is turned too
+    if (last && Math.abs((ch.x0 + ch.x1) / 2 - (last.x0 + last.x1) / 2) < d &&
+        Math.abs((ch.y0 + ch.y1) / 2 - (last.y0 + last.y1) / 2) < d) groups[groups.length - 1].push(ch);
     else groups.push([ch]);
   }
   return groups;
@@ -1155,6 +1506,9 @@ function markFurniture(pages) {
     : signature(b.text);
   const zone = (b, p) => {
     if (!b.bbox || !["paragraph", "heading", "list_item", "figure"].includes(b.type)) return null;
+    const [x0, y0, x1, y1] = b.bbox;
+    if (b.type !== "figure" && x1 - x0 < p.width * 0.06 && y1 - y0 > p.height * 0.1 &&
+        (x1 <= p.width * 0.1 || x0 >= p.width * 0.9)) return "margin"; // side stamp (arXiv id…)
     if (b.bbox[3] <= p.height * EDGE_ZONE + 20 || (b.type === "figure" && b.bbox[1] <= p.height * EDGE_ZONE)) return "header";
     if (b.bbox[1] >= p.height * (1 - EDGE_ZONE) - 20) return "footer";
     return null;
@@ -1171,8 +1525,9 @@ function markFurniture(pages) {
       const z = zone(b, p);
       if (!z) continue;
       const k = key(b);
-      if (b.type !== "figure" && PAGE_NUMBER.test(b.text.trim())) b.type = "page_number";
-      else if (pages.length >= 2 && (counts.get(z + "|" + k) || 0) >= need && k.length >= 3) b.type = z;
+      if (z === "margin") b.type = "header";
+      else if (b.type !== "figure" && PAGE_NUMBER.test(b.text.trim())) b.type = "page_number";
+      else if (pages.length >= 2 && (counts.get(z + "|" + k) || 0) >= (b.type === "figure" ? 2 : need) && k.length >= 3) b.type = z;
     }
 }
 
@@ -1180,6 +1535,15 @@ function classifyHeadings(pages, body) {
   const candidates = [];
   for (const p of pages) {
     p.blocks.forEach((b, i) => {
+      // A one-line "list item" set bold or bigger than the body is a numbered section heading.
+      const neighbours = [p.blocks[i - 1], p.blocks[i + 1]].filter(Boolean).map((x) => x.type);
+      if (b.type === "list_item" && !neighbours.includes("list_item") && b.lines === 1 && b.marker &&
+          /^\d/.test(b.marker) && b.text.length <= 80 &&
+          ((b.font_size || body) >= body * 1.25 || (b.bold && !/\.$/.test(b.text.trimEnd())))) {
+        b.text = `${b.marker} ${b.text}`;
+        b.type = "paragraph";
+        delete b.marker;
+      }
       if (b.type !== "paragraph" || !b.text) return;
       const text = b.text.trim();
       if (b.lines > 3 || text.length > 200 || /[,;]$/.test(text) || CAPTION.test(text)) return;
@@ -1318,10 +1682,16 @@ export async function extractDocument(data, opts = {}) {
   classifyHeadings(pages, body);
   for (const p of pages) {
     linkCaptions(p);
+    layoutFormat(p);
     p.blocks.forEach((b, n) => {
       b.order = n; b.id = `p${p.number}-b${n}`;
-      if (b.font_size) b.style = { size: Math.round(b.font_size * 10) / 10, bold: !!b.bold };
-      delete b.font_size; delete b.bold; delete b.lines;
+      if (b.font_size) {
+        b.style = { size: Math.round(b.font_size * 10) / 10, bold: !!b.bold };
+        if (b.pt) b.style.pt = b.pt;
+        if (b.font) b.style.font = b.font;
+        if (b.tracking) b.style.tracking = b.tracking;
+      }
+      delete b.font_size; delete b.bold; delete b.lines; delete b.line_boxes; delete b.pt; delete b.font; delete b.tracking;
       if (b.number === null) delete b.number;
     });
   }

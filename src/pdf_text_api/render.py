@@ -74,15 +74,74 @@ def figure_words(text: str) -> list[str]:
     return out
 
 
+def md_inline(b: Block) -> str:
+    """Inline formatting as Markdown: **bold**, *italic*, <sup>/<sub>; kept line breaks."""
+    if not b.runs:
+        return b.text.replace("\n", "  \n")
+    out = []
+    for r in b.runs:
+        text = r["text"]
+        core = text.strip()
+        if not core:
+            out.append(text)
+            continue
+        lead, trail = text[: len(text) - len(text.lstrip())], text[len(text.rstrip()) :]
+        t = core.replace("*", "\\*")
+        if r.get("script"):
+            tag = "sup" if r["script"] == "super" else "sub"
+            t = f"<{tag}>{t}</{tag}>"
+        if r.get("italic"):
+            t = f"*{t}*"
+        if r.get("bold"):
+            t = f"**{t}**"
+        out.append(lead + t + trail)
+    return "".join(out).replace("\n", "  \n")
+
+
+def html_inline(b: Block) -> str:
+    def br(t: str) -> str:
+        return html.escape(t).replace("\n", "<br>")
+
+    if not b.runs:
+        return br(b.text)
+    out = []
+    for r in b.runs:
+        t = br(r["text"])
+        if r.get("script"):
+            tag = "sup" if r["script"] == "super" else "sub"
+            t = f"<{tag}>{t}</{tag}>"
+        if r.get("italic"):
+            t = f"<em>{t}</em>"
+        if r.get("bold"):
+            t = f"<strong>{t}</strong>"
+        out.append(t)
+    return "".join(out)
+
+
+def html_style(b: Block) -> str:
+    css = []
+    if b.align and b.align != "left":
+        css.append(f"text-align:{b.align}")
+    if b.indent:
+        css.append(f"margin-left:{b.indent}pt")
+    if b.first_line:
+        css.append(f"text-indent:{b.first_line}pt")
+    if b.line_spacing:
+        css.append(f"line-height:{round(b.line_spacing * 1.15, 2)}")
+    if b.tracking:
+        css.append(f"letter-spacing:{b.tracking}pt")
+    return f' style="{";".join(css)}"' if css else ""
+
+
 def block_markdown(b: Block, images: ImageMode = "ref") -> str:
     t = b.type
     if t == "heading":
-        return "#" * min(6, max(1, b.level or 2)) + " " + b.text
+        return "#" * min(6, max(1, b.level or 2)) + " " + b.text.replace("\n", " ")
     if t == "list_item":
         marker = b.marker or "-"
         if marker[:1] in "•◦▪▫‣⁃●○■□–—*✓✔➢➤►▶·-":
             marker = "-"
-        return "  " * (b.level or 0) + f"{marker} {b.text}"
+        return "  " * (b.level or 0) + f"{marker} {md_inline(b)}"
     if t == "table" and b.rows:
         # The crop of the table stays in JSON/ZIP: repeating it here would duplicate the table.
         return md_table(b.rows)
@@ -102,7 +161,7 @@ def block_markdown(b: Block, images: ImageMode = "ref") -> str:
         return f"*{b.text}*"
     if t == "code":
         return f"```\n{b.text}\n```"
-    return b.text
+    return md_inline(b)
 
 
 def to_markdown(
@@ -157,10 +216,10 @@ def block_html(b: Block, images: ImageMode = "embed") -> str:
     a = _attrs(b)
     if b.type == "heading":
         lvl = min(6, max(1, b.level or 2))
-        return f"<h{lvl}{a}>{e(b.text)}</h{lvl}>"
+        return f"<h{lvl}{a}{html_style(b)}>{e(b.text.replace(chr(10), ' '))}</h{lvl}>"
     if b.type == "list_item":
         pad = (b.level or 0) * 1.5
-        return f'<p{a} style="margin-left:{pad}rem">{e(b.marker or "•")} {e(b.text)}</p>'
+        return f'<p{a} style="margin-left:{pad}rem">{e(b.marker or "•")} {html_inline(b)}</p>'
     if b.type == "table" and b.rows:
         head = "".join(f"<th>{e(c)}</th>" for c in b.rows[0])
         body = "".join(
@@ -183,10 +242,10 @@ def block_html(b: Block, images: ImageMode = "embed") -> str:
         cap = f"<figcaption>{e(b.caption)}</figcaption>" if b.caption else ""
         return f"<figure{a}>{img}{cap}</figure>"
     if b.type == "caption":
-        return f"<p{a}><em>{e(b.text)}</em></p>"
+        return f"<p{a}{html_style(b)}><em>{html_inline(b)}</em></p>"
     if b.type == "code":
         return f"<pre{a}><code>{e(b.text)}</code></pre>"
-    return f"<p{a}>{e(b.text)}</p>"
+    return f"<p{a}{html_style(b)}>{html_inline(b)}</p>"
 
 
 def to_html(doc: Document, *, images: ImageMode = "embed", title: str | None = None) -> str:

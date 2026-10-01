@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" width="760" height="360" role="img" aria-labelledby="t d" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<title id="t">Average extraction time per PDF</title>
+<desc id="d">PyMuPDF: 97 ms; papero · fast: 136 ms; papero · structured: 902 ms; pypdf: 1.52 s; pdfplumber: 3.56 s; Docling: 82.9 s. 50+ academic papers from arXiv, CPU only, log scale.</desc>
+<style>.bg{fill:#ffffff}.ink{fill:#1f2328}.sub{fill:#656d76}.grid{stroke:#d8dee4}.base{stroke:#8c959f}.dot{fill:#6b7280}.dot.p{fill:#c2410c}.stem{stroke:#d0d7de}.stem.p{stroke:#f6c7a8}.val{fill:#1f2328}.ring{stroke:#ffffff}@media (prefers-color-scheme: dark){.bg{fill:#0d1117}.ink,.val{fill:#e6edf3}.sub{fill:#8d96a0}.grid{stroke:#262c33}.base{stroke:#57606a}.dot{fill:#9ca3af}.dot.p{fill:#fb923c}.stem{stroke:#30363d}.stem.p{stroke:#7c3a12}.ring{stroke:#0d1117}}</style>
+<rect class="bg" width="760" height="360" rx="12"/>
+<text class="ink" x="24" y="34" font-size="18" font-weight="650">Average extraction time per PDF</text>
+<text class="sub" x="24" y="56" font-size="13">50+ dense arXiv papers · CPU only · no GPU · lower is better · log scale</text>
+<line class="grid" x1="284.6" y1="64" x2="284.6" y2="308" stroke-width="1"/>
+<text class="sub" x="284.6" y="326" font-size="12" text-anchor="middle">100 ms</text>
+<line class="grid" x1="399.7" y1="64" x2="399.7" y2="308" stroke-width="1"/>
+<text class="sub" x="399.7" y="326" font-size="12" text-anchor="middle">1 s</text>
+<line class="grid" x1="514.7" y1="64" x2="514.7" y2="308" stroke-width="1"/>
+<text class="sub" x="514.7" y="326" font-size="12" text-anchor="middle">10 s</text>
+<line class="grid" x1="629.7" y1="64" x2="629.7" y2="308" stroke-width="1"/>
+<text class="sub" x="629.7" y="326" font-size="12" text-anchor="middle">100 s</text>
+<text class="ink" x="24" y="86" font-size="14" font-weight="500">PyMuPDF</text>
+<text class="sub" x="24" y="102" font-size="12">raw text</text>
+<line class="stem" x1="250.0" y1="92" x2="283.2" y2="92" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot ring" cx="283.2" cy="92" r="7" stroke-width="2"/>
+<text class="val" x="297.2" y="97" font-size="13" font-weight="500">97 ms</text>
+<text class="ink" x="24" y="126" font-size="14" font-weight="650">papero · fast</text>
+<text class="sub" x="24" y="142" font-size="12">clean text (Tika)</text>
+<line class="stem p" x1="250.0" y1="132" x2="299.8" y2="132" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot p ring" cx="299.8" cy="132" r="7" stroke-width="2"/>
+<text class="val" x="313.8" y="137" font-size="13" font-weight="650">136 ms</text>
+<text class="ink" x="24" y="166" font-size="14" font-weight="650">papero · structured</text>
+<text class="sub" x="24" y="182" font-size="12">order, tables, formulas, figures</text>
+<line class="stem p" x1="250.0" y1="172" x2="394.5" y2="172" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot p ring" cx="394.5" cy="172" r="7" stroke-width="2"/>
+<text class="val" x="408.5" y="177" font-size="13" font-weight="650">902 ms</text>
+<text class="ink" x="24" y="206" font-size="14" font-weight="500">pypdf</text>
+<text class="sub" x="24" y="222" font-size="12">raw text</text>
+<line class="stem" x1="250.0" y1="212" x2="420.6" y2="212" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot ring" cx="420.6" cy="212" r="7" stroke-width="2"/>
+<text class="val" x="434.6" y="217" font-size="13" font-weight="500">1.52 s</text>
+<text class="ink" x="24" y="246" font-size="14" font-weight="500">pdfplumber</text>
+<text class="sub" x="24" y="262" font-size="12">text + tables</text>
+<line class="stem" x1="250.0" y1="252" x2="463.0" y2="252" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot ring" cx="463.0" cy="252" r="7" stroke-width="2"/>
+<text class="val" x="477.0" y="257" font-size="13" font-weight="500">3.56 s</text>
+<text class="ink" x="24" y="286" font-size="14" font-weight="500">Docling</text>
+<text class="sub" x="24" y="302" font-size="12">ML layout models</text>
+<line class="stem" x1="250.0" y1="292" x2="620.4" y2="292" stroke-width="2" stroke-linecap="round"/>
+<circle class="dot ring" cx="620.4" cy="292" r="7" stroke-width="2"/>
+<text class="val" x="634.4" y="297" font-size="13" font-weight="500">82.9 s</text>
+<text class="sub" x="24" y="348" font-size="11">Docling: ~83 s per paper on CPU. papero · structured runs layout analysis on every page (measured on 54 papers, same machine).</text>
+</svg>

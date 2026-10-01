@@ -47,14 +47,46 @@ export function figureWords(text) {
     .map((ln) => ln.split(/\s+/).filter((t) => t && !/^[-+−]?[\d.,%]+$/.test(t)).join(" "))
     .filter((ln) => /\p{L}/u.test(ln));
 }
+// Inline formatting as Markdown: **bold**, *italic*, <sup>/<sub>; markers hug the words.
+function mdInline(b) {
+  if (!b.runs?.length) return (b.text || "").replace(/\n/g, "  \n");
+  return b.runs.map((r) => {
+    const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(r.text);
+    if (!core) return r.text;
+    let t = core.replace(/\*/g, "\\*");
+    if (r.script) t = r.script === "super" ? `<sup>${t}</sup>` : `<sub>${t}</sub>`;
+    if (r.italic) t = `*${t}*`;
+    if (r.bold) t = `**${t}**`;
+    return lead + t + trail;
+  }).join("").replace(/\n/g, "  \n");
+}
+function htmlInline(b) {
+  const br = (t) => esc(t).replace(/\n/g, "<br>");
+  if (!b.runs?.length) return br(b.text || "");
+  return b.runs.map((r) => {
+    let t = br(r.text);
+    if (r.script) t = r.script === "super" ? `<sup>${t}</sup>` : `<sub>${t}</sub>`;
+    if (r.italic) t = `<em>${t}</em>`;
+    if (r.bold) t = `<strong>${t}</strong>`;
+    return t;
+  }).join("");
+}
+function htmlStyle(b) {
+  const f = b.format || {}, out = [];
+  if (f.align && f.align !== "left") out.push(`text-align:${f.align}`);
+  if (f.indent) out.push(`margin-left:${f.indent}pt`);
+  if (f.first_line) out.push(`text-indent:${f.first_line}pt`);
+  if (f.line_spacing) out.push(`line-height:${Math.round(f.line_spacing * 115) / 100}`);
+  return out.length ? ` style="${out.join(";")}"` : "";
+}
 export function blockMarkdown(b, images = "ref") {
   switch (b.type) {
     case "heading":
-      return "#".repeat(Math.min(6, Math.max(1, b.level || 2))) + " " + b.text;
+      return "#".repeat(Math.min(6, Math.max(1, b.level || 2))) + " " + b.text.replace(/\n/g, " ");
     case "list_item": {
       let marker = b.marker || "-";
       if (BULLET_CHARS.includes(marker[0])) marker = "-";
-      return "  ".repeat(b.level || 0) + `${marker} ${b.text}`;
+      return "  ".repeat(b.level || 0) + `${marker} ${mdInline(b)}`;
     }
     case "table":
       return b.rows ? mdTable(b.rows) : b.text;
@@ -74,7 +106,7 @@ export function blockMarkdown(b, images = "ref") {
     case "code":
       return "```\n" + b.text + "\n```";
     default:
-      return b.text || "";
+      return mdInline(b);
   }
 }
 export function toMarkdown(doc, { images = "ref", pageBreaks = false } = {}) {
@@ -103,10 +135,10 @@ export function blockHtml(b, images = "embed") {
   switch (b.type) {
     case "heading": {
       const l = Math.min(6, Math.max(1, b.level || 2));
-      return `<h${l}${a}>${esc(b.text)}</h${l}>`;
+      return `<h${l}${a}${htmlStyle(b)}>${esc(b.text.replace(/\n/g, " "))}</h${l}>`;
     }
     case "list_item":
-      return `<p${a} style="margin-left:${(b.level || 0) * 1.5}rem">${esc(b.marker || "•")} ${esc(b.text)}</p>`;
+      return `<p${a} style="margin-left:${(b.level || 0) * 1.5}rem">${esc(b.marker || "•")} ${htmlInline(b)}</p>`;
     case "table": {
       if (!b.rows) return `<p${a}>${esc(b.text)}</p>`;
       const head = b.rows[0].map((c) => `<th>${esc(c)}</th>`).join("");
@@ -122,11 +154,11 @@ export function blockHtml(b, images = "embed") {
       return `<figure${a}>${src ? `<img src="${src}" alt="${esc(b.caption || "figura")}">` : ""}${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ""}</figure>`;
     }
     case "caption":
-      return `<p${a}><em>${esc(b.text)}</em></p>`;
+      return `<p${a}${htmlStyle(b)}><em>${htmlInline(b)}</em></p>`;
     case "code":
       return `<pre${a}><code>${esc(b.text)}</code></pre>`;
     default:
-      return `<p${a}>${esc(b.text)}</p>`;
+      return `<p${a}${htmlStyle(b)}>${htmlInline(b)}</p>`;
   }
 }
 const HTML_STYLE = `body{font:16px/1.6 system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1f2328}
@@ -196,53 +228,156 @@ export async function toXlsx(doc) {
 }
 
 // ---------------------------------------------------------------- docx
+// Word export that keeps the page's look: page size and margins, alignment, indents, line
+// spacing, bold/italic/super/subscript runs with the real font and size, intended line
+// breaks, vertical spacing, page breaks, images at their size on the page, and blocks set
+// side by side (a logo next to a letterhead) as a borderless table.
+const TWIP = 20; // per point
+const EMU = 12700; // per point
+const JC = { left: "left", center: "center", right: "right", justify: "both" };
+
+function docxRuns(b, extraProps = "") {
+  const pt = b.style?.pt;
+  const font = b.style?.font;
+  const base = (b.style?.tracking ? `<w:spacing w:val="${Math.round(b.style.tracking * TWIP)}"/>` : "") +
+    (pt ? `<w:sz w:val="${Math.round(pt * 2)}"/><w:szCs w:val="${Math.round(pt * 2)}"/>` : "") +
+    (font ? `<w:rFonts w:ascii="${xmlEsc(font)}" w:hAnsi="${xmlEsc(font)}" w:cs="${xmlEsc(font)}"/>` : "");
+  const runs = b.runs?.length ? b.runs : [{ text: b.text || "", bold: !!b.style?.bold, italic: false, script: null }];
+  return runs.map((r) => {
+    const props = (r.bold ? "<w:b/><w:bCs/>" : "") + (r.italic ? "<w:i/><w:iCs/>" : "") +
+      (r.script ? `<w:vertAlign w:val="${r.script === "super" ? "superscript" : "subscript"}"/>` : "") + base + extraProps;
+    const pieces = String(r.text).split("\n").map((t) => `<w:t xml:space="preserve">${xmlEsc(t)}</w:t>`);
+    return `<w:r>${props ? `<w:rPr>${props}</w:rPr>` : ""}${pieces.join("<w:br/>")}</w:r>`;
+  }).join("");
+}
+
+function docxParaProps(b, before, style) {
+  const f = b.format || {};
+  const parts = [];
+  if (style) parts.push(`<w:pStyle w:val="${style}"/>`);
+  const spacing = [`w:before="${Math.round(before * TWIP)}"`, 'w:after="0"'];
+  if (f.line_spacing) spacing.push(`w:line="${Math.round(240 * f.line_spacing)}" w:lineRule="auto"`);
+  parts.push(`<w:spacing ${spacing.join(" ")}/>`);
+  if (f.indent || f.first_line) {
+    const ind = [];
+    if (f.indent) ind.push(`w:left="${Math.round(f.indent * TWIP)}"`);
+    if (f.first_line > 0) ind.push(`w:firstLine="${Math.round(f.first_line * TWIP)}"`);
+    if (f.first_line < 0) ind.push(`w:hanging="${Math.round(-f.first_line * TWIP)}"`);
+    parts.push(`<w:ind ${ind.join(" ")}/>`);
+  }
+  if (f.align && JC[f.align]) parts.push(`<w:jc w:val="${JC[f.align]}"/>`);
+  return `<w:pPr>${parts.join("")}</w:pPr>`;
+}
+
 export async function toDocx(doc) {
   const zip = new JSZip();
   const media = [];
-  const run = (t, props = "") => `<w:r>${props ? `<w:rPr>${props}</w:rPr>` : ""}<w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
-  const para = (inner, style) => `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ""}${inner}</w:p>`;
-  const EMU = 9525; // per pixel at 96 dpi
-  const imageXml = (img, id) => {
-    const maxW = 600;
-    const w = Math.min(maxW, img.width / 2), h = (img.height / 2) * (w / (img.width / 2));
-    const cx = Math.round(w * EMU), cy = Math.round(h * EMU);
-    return `<w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="${xmlEsc(img.name)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="${xmlEsc(img.name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rImg${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+  const imageXml = (img, b) => {
+    const wPt = b.bbox ? b.bbox[2] - b.bbox[0] : img.width / 2;
+    const hPt = b.bbox ? b.bbox[3] - b.bbox[1] : img.height / 2;
+    const cx = Math.round(wPt * EMU), cy = Math.round(hPt * EMU);
+    const id = media.length - 1; // the image was just pushed: rImg{id} in the relationships
+    return `<w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id + 1}" name="${xmlEsc(img.name)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id + 1}" name="${xmlEsc(img.name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rImg${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
   };
-  const body = [];
-  for (const page of doc.pages) {
-    for (const b of contentBlocks(page)) {
-      switch (b.type) {
-        case "heading": body.push(para(run(b.text), `Heading${Math.min(6, Math.max(1, b.level || 2))}`)); break;
-        case "list_item": body.push(para(run(`${"   ".repeat(b.level || 0)}${b.marker || "•"} ${b.text}`), "ListParagraph")); break;
-        case "table": {
-          if (!b.rows) break;
-          const width = Math.max(...b.rows.map((r) => r.length));
-          const rows = b.rows.map((r, ri) => `<w:tr>${[...r, ...Array(width - r.length).fill("")].map((c) =>
-            `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr>${String(c).split("\n").map((ln) => para(run(ln, ri === 0 ? "<w:b/>" : ""))).join("")}</w:tc>`).join("")}</w:tr>`).join("");
-          body.push(`<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="999999"/>`).join("")}</w:tblBorders></w:tblPr>${rows}</w:tbl>`);
-          if (b.caption) body.push(para(run(b.caption, "<w:i/>"), "Caption"));
-          break;
-        }
-        case "formula": body.push(para(run(b.latex || b.text, '<w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math"/>') + (b.number ? run("  " + b.number) : ""))); break;
-        case "figure":
-          if (b.image?.data) {
-            media.push(b.image);
-            body.push(para(imageXml(b.image, media.length)));
-          }
-          if (b.caption) body.push(para(run(b.caption, "<w:i/>"), "Caption"));
-          break;
-        case "caption": body.push(para(run(b.text, "<w:i/>"), "Caption")); break;
-        case "code": for (const ln of b.text.split("\n")) body.push(para(run(ln, '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>'))); break;
-        default: if (b.text) body.push(para(run(b.text)));
+
+  // One block -> one or more <w:p>/<w:tbl>, with `before` points of space above it.
+  const blockXml = (b, before) => {
+    switch (b.type) {
+      case "heading": {
+        const lvl = Math.min(6, Math.max(1, b.level || 2));
+        return `<w:p>${docxParaProps(b, before, `Heading${lvl}`)}${docxRuns({ ...b, text: b.text.replace(/\n/g, " ") })}</w:p>`;
       }
+      case "list_item": {
+        const marker = `${b.marker || "•"} `;
+        const runs = b.runs?.length ? [{ text: marker, bold: false, italic: false, script: null }, ...b.runs] : null;
+        return `<w:p>${docxParaProps(b, before)}${docxRuns({ ...b, text: marker + b.text, runs })}</w:p>`;
+      }
+      case "table": {
+        if (!b.rows) return "";
+        const width = Math.max(...b.rows.map((r) => r.length));
+        const total = b.bbox ? Math.round((b.bbox[2] - b.bbox[0]) * TWIP) : 9000;
+        const col = Math.round(total / width);
+        const pt = b.style?.pt;
+        const cellRun = (t, bold) => ({ text: t, style: { pt, font: b.style?.font, bold }, runs: [{ text: t, bold, italic: false, script: null }] });
+        const rows = b.rows.map((r, ri) => `<w:tr>${[...r, ...Array(width - r.length).fill("")].map((c) =>
+          `<w:tc><w:tcPr><w:tcW w:w="${col}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>${docxRuns(cellRun(String(c), ri === 0))}</w:p></w:tc>`).join("")}</w:tr>`).join("");
+        const borders = ["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`).join("");
+        let out = `<w:p>${docxParaProps({}, before)}</w:p><w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${Array(width).fill(`<w:gridCol w:w="${col}"/>`).join("")}</w:tblGrid>${rows}</w:tbl>`;
+        if (b.caption) out += `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>${docxRuns({ text: b.caption, runs: [{ text: b.caption, italic: true }] })}</w:p>`;
+        return out;
+      }
+      case "formula":
+        return `<w:p>${docxParaProps({ ...b, format: { align: "center" } }, before)}${docxRuns({ ...b, text: b.latex || b.text, runs: null, style: { ...b.style, font: "Cambria Math" } })}${b.number ? `<w:r><w:t xml:space="preserve">  ${xmlEsc(b.number)}</w:t></w:r>` : ""}</w:p>`;
+      case "figure": {
+        let out = "";
+        if (b.image?.data) {
+          media.push(b.image);
+          out += `<w:p>${docxParaProps(b, before)}${imageXml(b.image, b)}</w:p>`;
+        }
+        if (b.caption) out += `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>${docxRuns({ text: b.caption, runs: [{ text: b.caption, italic: true }] })}</w:p>`;
+        return out;
+      }
+      case "caption":
+        return `<w:p>${docxParaProps(b, before, "Caption")}${docxRuns(b)}</w:p>`;
+      case "code":
+        return b.text.split("\n").map((ln, i) => `<w:p>${docxParaProps({}, i ? 0 : before)}${docxRuns({ text: ln, style: { pt: b.style?.pt, font: "Consolas" } })}</w:p>`).join("");
+      default:
+        return b.text || b.runs ? `<w:p>${docxParaProps(b, before)}${docxRuns(b)}</w:p>` : "";
     }
-  }
+  };
+
+  // Page size and margins from the first page and the text area of all pages.
+  const first = doc.pages[0] || { width: 595, height: 842, blocks: [] };
+  const boxes = doc.pages.flatMap((p) => contentBlocks(p)).filter((b) => b.bbox).map((b) => b.bbox);
+  const W = first.width || 595, H = first.height || 842;
+  const areaLeft = boxes.length ? Math.min(...boxes.map((b) => b[0])) : 56.7;
+  const margin = (v) => Math.round(Math.max(18, Math.min(144, v)) * TWIP);
+  const mLeft = margin(areaLeft);
+  const mRight = boxes.length ? margin(W - Math.max(...boxes.map((b) => b[2]))) : 1134;
+  const mTop = boxes.length ? margin(Math.min(...boxes.map((b) => b[1])) - 12) : 1134;
+  const mBottom = boxes.length ? margin(H - Math.max(...boxes.map((b) => b[3])) - 12) : 1134;
+
+  const body = [];
+  doc.pages.forEach((page, pi) => {
+    const blocks = contentBlocks(page);
+    if (pi > 0) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    const top = blocks.length && blocks[0].bbox ? blocks[0].bbox[1] : 0;
+    let bottom = top;
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      const before = b.bbox ? Math.max(0, Math.min(H * 0.6, b.bbox[1] - bottom - (b.style?.pt || 10) * 0.3)) : 6;
+      // Blocks side by side (logo + letterhead, two signatures): a borderless table row.
+      const row = [b];
+      while (b.bbox && i + row.length < blocks.length) {
+        const n = blocks[i + row.length];
+        const last = row[row.length - 1];
+        if (!n.bbox) break;
+        const overlap = Math.min(last.bbox[3], n.bbox[3]) - Math.max(last.bbox[1], n.bbox[1]);
+        const minH = Math.min(last.bbox[3] - last.bbox[1], n.bbox[3] - n.bbox[1]);
+        if (overlap < minH * 0.5 || n.bbox[0] < last.bbox[2] - 2 || n.type === "table") break;
+        row.push(n);
+      }
+      if (row.length > 1) {
+        const x0 = row[0].bbox[0];
+        // Word adds ~5.4 pt of padding on each side of a cell: give each one that room.
+        const widths = row.map((r, k) => Math.round(((k + 1 < row.length ? row[k + 1].bbox[0] : r.bbox[2] + 24) - r.bbox[0] + 12) * TWIP));
+        const cells = row.map((r, k) => `<w:tc><w:tcPr><w:tcW w:w="${widths[k]}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${blockXml({ ...r, format: { ...(r.format || {}), indent: 0 } }, 0) || "<w:p/>"}</w:tc>`).join("");
+        body.push(`<w:p>${docxParaProps({}, before)}</w:p><w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblInd w:w="${Math.round(Math.max(0, x0 - areaLeft) * TWIP)}" w:type="dxa"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="nil"/>`).join("")}</w:tblBorders></w:tblPr><w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>`);
+        bottom = Math.max(...row.map((r) => r.bbox[3]));
+        i += row.length - 1;
+        continue;
+      }
+      body.push(blockXml(b, before));
+      if (b.bbox) bottom = b.bbox[3];
+    }
+  });
+
   media.forEach((img, k) => zip.file(`word/media/image${k + 1}.png`, img.data, { base64: true }));
-  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
-  zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${body.join("")}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`);
-  const headingStyles = [1, 2, 3, 4, 5, 6].map((l) => `<w:style w:type="paragraph" w:styleId="Heading${l}"><w:name w:val="heading ${l}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="80"/><w:outlineLvl w:val="${l - 1}"/></w:pPr><w:rPr><w:b/><w:sz w:val="${[40, 32, 28, 26, 24, 22][l - 1]}"/></w:rPr></w:style>`).join("");
-  zip.file("word/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>${headingStyles}<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="360"/><w:spacing w:after="40"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:color w:val="555555"/><w:sz w:val="20"/></w:rPr></w:style><w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblCellMar><w:left w:w="108" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`);
-  zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${media.map((_, k) => `<Relationship Id="rImg${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${k + 1}.png"/>`).join("")}</Relationships>`);
+  const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
+  zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body.join("")}<w:sectPr><w:pgSz w:w="${Math.round(W * TWIP)}" w:h="${Math.round(H * TWIP)}"/><w:pgMar w:top="${mTop}" w:right="${mRight}" w:bottom="${mBottom}" w:left="${mLeft}" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`);
+  const headingStyles = [1, 2, 3, 4, 5, 6].map((l) => `<w:style w:type="paragraph" w:styleId="Heading${l}"><w:name w:val="heading ${l}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="${l - 1}"/></w:pPr><w:rPr><w:b/><w:sz w:val="${[32, 28, 26, 24, 22, 22][l - 1]}"/></w:rPr></w:style>`).join("");
+  zip.file("word/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>${headingStyles}<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:color w:val="555555"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
+  zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${media.map((_, k) => `<Relationship Id="rImg${k}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${k + 1}.png"/>`).join("")}</Relationships>`);
   zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
   return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });

@@ -312,5 +312,117 @@ def hard_cases_pdf(path: Path) -> Path:
                     pdf.cell(wd, 6, text)
                     x += wd
                 ty += 6
+
+    # p5 ---------------------------------------------------------------- paper page
+    # booktabs table whose cells wrap over several lines (rows set apart by extra space),
+    # then a scatter plot with a long axis title and a legend of markers under it.
+    pdf.add_page()
+    pdf.set_font(F, size=9)
+    pdf.set_line_width(0.5)
+    pdf.line(20, 20, 190, 20)
+    heads = ["study", "statistics", "methods", "divergence"]
+    xs = [20, 60, 100, 145]
+    for x, h in zip(xs, heads, strict=True):
+        pdf.text(x, 25, h)
+    pdf.set_line_width(0.2)
+    pdf.line(20, 27, 190, 27)
+    body = [
+        (
+            ["Dutta et al.", "(2024)"],
+            ["flips, KL"],
+            ["6 quant.", "schemes, layer", "drop, Wanda"],
+            ["correlation;", "margin account"],
+        ),
+        (
+            ["Qamar et al.", "(2026)"],
+            ["TV, JS,", "accuracy"],
+            ["llama.cpp", "formats"],
+            ["only evaluates", "endpoint"],
+        ),
+        (["this work"], ["flips, KL, TV"], ["9 families,", "MoE, QAT"], ["ratio = 1 (TV)"]),
+    ]
+    y = 32.0
+    for row in body:
+        for x, lines in zip(xs, row, strict=True):
+            for k, ln in enumerate(lines):
+                pdf.text(x, y + k * 3.6, ln)
+        y += max(len(c) for c in row) * 3.6 + 2.6  # extra space between logical rows
+    pdf.set_line_width(0.5)
+    pdf.line(20, y - 1.5, 190, y - 1.5)
+
+    import random
+
+    rnd = random.Random(7)
+    px, py, pw, ph = 60, 110, 90, 60
+    pdf.set_line_width(0.3)
+    pdf.rect(px, py, pw, ph)
+    colors = [(220, 60, 60), (40, 110, 220), (240, 150, 30)]
+    for _ in range(120):
+        t = rnd.random()
+        pdf.set_fill_color(*rnd.choice(colors))
+        pdf.ellipse(
+            px + 3 + t * (pw - 8),
+            py + ph - 5 - t * (ph - 10) + rnd.uniform(-4, 4),
+            1.4,
+            1.4,
+            style="F",
+        )
+    pdf.set_font(F, size=7)
+    for k, lab in enumerate(["10^-1", "10^0"]):
+        pdf.text(px + 20 + k * 45, py + ph + 4, lab)
+    pdf.text(px + 15, py + ph + 9, "KL (per-token KL averaged, then rooted)")
+    for k, lab in enumerate(["GSM8K", "MMLU-en", "WikiText (natural)"]):
+        pdf.set_fill_color(*colors[k])
+        pdf.ellipse(px + 2 + k * 30, py + ph + 12, 1.6, 1.6, style="F")
+        pdf.text(px + 5 + k * 30, py + ph + 13.4, lab)
+    pdf.set_font(F, size=10)
+    pdf.text(20, py + ph + 24, "Figure 1: The same configurations, measured two ways.")
+    pdf.output(str(path))
+    return path
+
+
+def declaration_pdf(path: Path) -> Path:
+    """A one-page institutional letter (no real data): logo + 3-line header beside it, a
+    letter-spaced centred bold title, a justified 1.5-spaced paragraph with bold runs and a
+    first-line indent, option lines aligned with *white* (invisible) text, centred footer."""
+    from PIL import Image, ImageDraw
+
+    pdf, F = _pdf()
+    pdf.add_page()
+    logo = Image.new("RGB", (80, 80), "white")
+    ImageDraw.Draw(logo).ellipse([5, 5, 75, 75], fill=(20, 80, 180))
+    pdf.image(logo, x=25, y=12, w=20)
+    pdf.set_font(F, "B", 11)
+    for k, line in enumerate(
+        ["UNIVERSIDADE EXEMPLO", "PRÓ-REITORIA DE GRADUAÇÃO", "CENTRO ACADÊMICO"]
+    ):
+        pdf.text(50, 18 + k * 5, line)
+    pdf.set_font(F, "B", 13)
+    pdf.set_char_spacing(3)
+    title = "DECLARAÇÃO DE VÍNCULO"
+    pdf.text(105 - pdf.get_string_width(title) / 2, 60, title)
+    pdf.set_char_spacing(0)
+    pdf.set_font(F, size=11)
+    pdf.set_xy(25, 75)
+    text = (
+        "            Atestamos que a estudante **FULANA DE TAL**, matrícula Nº **000000000** "
+        "ingressou nesta Universidade em **2023.1** e encontra-se regularmente vinculada ao "
+        "curso de graduação de **CIÊNCIA DA COMPUTAÇÃO**, turno **INTEGRAL**."
+    )
+    pdf.multi_cell(160, 8, text, align="J", markdown=True)  # 1.5 line spacing
+    y = pdf.get_y() + 2
+    pdf.text(25, y, "Situação do vínculo: (X) Matriculada em disciplinas")
+    for k, option in enumerate(["( ) Matrícula trancada", "( ) Participante de mobilidade"]):
+        yy = y + 7 * (k + 1)
+        pdf.set_text_color(255, 255, 255)  # invisible prefix used only to align the option
+        pdf.text(25, yy, "Situação do vínculo: (X)")
+        pdf.set_text_color(0, 0, 0)
+        pdf.text(25 + pdf.get_string_width("Situação do vínculo: "), yy, option)
+    pdf.set_font(F, "B", 12)
+    for k, line in enumerate(["Código de verificação:", "abc123"]):
+        pdf.text(105 - pdf.get_string_width(line) / 2, 200 + k * 6, line)
+    pdf.set_font(F, size=8)
+    foot = "Documento válido por 30 dias a partir da data de sua emissão."
+    pdf.text(105 - pdf.get_string_width(foot) / 2, 220, foot)
     pdf.output(str(path))
     return path
