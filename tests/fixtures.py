@@ -426,3 +426,58 @@ def declaration_pdf(path: Path) -> Path:
     pdf.text(105 - pdf.get_string_width(foot) / 2, 220, foot)
     pdf.output(str(path))
     return path
+
+
+def exam_pdf(path: Path) -> Path:
+    """An exam question the way equation editors draw it (no real data): an exponent set a
+    little smaller and raised, a stacked fraction (numerator, rule, denominator), a root sign
+    made of strokes over its radicand, and chemical indices with the state of matter."""
+    pdf, F = _pdf()
+    pdf.add_page()
+    pdf.set_line_width(0.2)
+    size = 12
+
+    def run(x: float, y: float, text: str, pt: float = size) -> float:
+        """Draw text at a baseline; return the x after it."""
+        pdf.set_font(F, size=pt)
+        pdf.text(x, y, text)
+        return x + pdf.get_string_width(text)
+
+    pdf.set_font(F, "B", size)
+    pdf.text(20, 20, "Questão nº 1")
+    x = run(20, 30, "Um cone tem volume igual a 64 cm")
+    x = run(x, 28.4, "3", size * 0.9)  # exponent: 90 % of the size, raised
+    x = run(x, 30, " e a circunferência x")
+    x = run(x, 28.4, "2", size * 0.9)
+    x = run(x, 30, " + y")
+    x = run(x, 28.4, "2", size * 0.9)
+    run(x, 30, " = 4 corta o eixo. Então a razão e a medida são")
+
+    # a) a stacked fraction: 5 over 12, with its rule
+    run(20, 46, "a)")
+    width = pdf.get_string_width("12")
+    pdf.text(30 + (width - pdf.get_string_width("5")) / 2, 43.2, "5")
+    pdf.line(29.6, 44.4, 30.4 + width, 44.4)
+    pdf.text(30, 49.2, "12")
+
+    # b) 10√2: the root sign is three strokes and a bar over the radicand
+    run(20, 60, "b)")
+    x = run(30, 60, "10")
+    top, bottom = 56.2, 60.6
+    pdf.line(x + 0.1, 58.6, x + 0.7, 58.3)  # the tick
+    pdf.line(x + 0.7, 58.3, x + 1.5, bottom)  # down
+    pdf.line(x + 1.5, bottom, x + 2.4, top)  # up
+    radicand = x + 2.6
+    pdf.line(x + 2.4, top, radicand + pdf.get_string_width("2") + 0.3, top)  # the bar
+    run(radicand, 60, "2")
+
+    # c) chemistry: indices lowered, the state of matter in the index too
+    run(20, 72, "c)")
+    x = run(30, 72, "CO")
+    x = run(x, 73.4, "2(g)", size * 0.9)
+    x = run(x, 72, " + H")
+    x = run(x, 73.4, "2", size * 0.9)
+    x = run(x, 72, "O")
+    run(x, 73.4, "(l)", size * 0.9)
+    pdf.output(str(path))
+    return path

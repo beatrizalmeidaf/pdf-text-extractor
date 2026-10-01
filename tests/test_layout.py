@@ -229,3 +229,71 @@ def test_intended_line_breaks_and_layout(letter):
     option = next(b for b in blocks if b.text.startswith("( ) Matr"))
     assert option.indent and option.indent > 90
     assert blocks[-1].align == "center" and blocks[-1].pt == 8.0
+
+
+# ----------------------------------------------------------------- drawn mathematics
+@pytest.fixture(scope="module")
+def exam(tmp_path_factory):
+    from fixtures import exam_pdf
+
+    doc = extract(exam_pdf(tmp_path_factory.mktemp("exam") / "exam.pdf"), tika=False)
+    return [b for b in doc.pages[0].blocks]
+
+
+def _text_of(blocks, start: str) -> str:
+    block = next(
+        b for b in blocks if (b.marker or "").startswith(start) or b.text.startswith(start)
+    )
+    return block.text
+
+
+def test_exponent_barely_smaller_than_the_text(exam):
+    question = _text_of(exam, "Um cone")
+    assert "64 cm³" in question
+    assert "x² + y² = 4" in question
+
+
+def test_stacked_fraction_is_read_as_a_fraction(exam):
+    assert _text_of(exam, "a)").endswith("5/12")
+
+
+def test_root_sign_drawn_with_strokes(exam):
+    assert _text_of(exam, "b)").endswith("10√2")
+    assert not any(b.type in ("table", "figure") for b in exam)  # its strokes are not a grid
+
+
+def test_chemical_indices_and_state_of_matter(exam):
+    assert _text_of(exam, "c)").endswith("CO₂(g) + H₂O(l)")
+
+
+# ----------------------------------------------------------------- columns, TeX fonts
+def test_gutter_between_two_columns_despite_a_spanning_title():
+    from pdf_text_api.columns import area_of, bands, columns
+
+    title = (120, 60, 480, 80)
+    left = [(50, 100 + 60 * k, 295, 150 + 60 * k) for k in range(8)]
+    right = [(310, 100 + 60 * k, 560, 150 + 60 * k) for k in range(8)]
+    boxes = [title, *left, *right]
+    cols = columns(boxes)
+    assert [(round(a), round(b)) for a, b in cols] == [(50, 295), (310, 560)]
+    assert area_of(left[0], cols) == cols[0] and area_of(title, cols) == (50, 560)
+    grouped = bands(boxes, bbox=lambda b: b, kind=lambda b: "paragraph")
+    assert [len(band["blocks"]) for band in grouped] == [1, 2]
+    assert [len(col) for col in grouped[1]["blocks"]] == [8, 8]
+
+
+def test_single_column_has_no_gutter():
+    from pdf_text_api.columns import columns
+
+    assert len(columns([(50, 100 + 30 * k, 560, 125 + 30 * k) for k in range(10)])) == 1
+
+
+def test_tex_font_codes_without_tounicode():
+    from pdf_text_api.tex_fonts import NOT, is_tex_producer, tex_char, tex_encoding
+
+    assert is_tex_producer("pdfTeX-1.40.21") and not is_tex_producer("Acrobat Distiller 11.0")
+    assert tex_encoding("ABCDEF+CMMI10") == "oml" and tex_encoding("TimesNewRomanPSMT") == ""
+    assert tex_char(0x0F, "oml") == "ϵ"  # epsilon1: no Unicode name, comes as a control code
+    assert tex_char(ord("h"), "oms") == "⟨" and tex_char(ord("6"), "oms") == NOT
+    assert tex_char(ord("{"), "oms") is None  # a real brace, already resolved by name
+    assert tex_char(0x58, "omx") == "∑"

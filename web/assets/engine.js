@@ -117,8 +117,8 @@ const signature = (t) => stripAccentsLower(t).split(/\s+/).filter(Boolean).join(
 const ENUM = /^(\(?(\d{1,3}(\.\d{1,3})*|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,5})[.)]|\(\d{1,3}\)|\([a-z]\))(?=\s|$)/;
 const NUMBERED_HEADING = /^(\d{1,2}(\.\d{1,2}){0,4})\.?\s+\S/;
 const CAPTION_WORDS = "(fig(ura|ure)?|tab(ela|le)?|quadro|gr[aá]fico|chart|imagem|image|equa[cç][aã]o|equation|listing|algoritmo|algorithm|esquema|diagrama|diagram)";
-const CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*(\\d+(\\.\\d+)?|[ivxlc]+)\\s*([.:\\-–—|]|\\s|$)`, "i");
-const STRICT_CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*(\\d+(\\.\\d+)?|[ivxlc]+)\\s*[.:\\-–—|]`, "i");
+const CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*((?:[a-z]\\.)?\\d+(\\.\\d+)?|[ivxlc]+)\\s*([.:\\-–—|]|\\s|$)`, "i");
+const STRICT_CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*((?:[a-z]\\.)?\\d+(\\.\\d+)?|[ivxlc]+)\\s*[.:\\-–—|]`, "i");
 const KEY_VALUE = /^[^:]{2,40}:\s+\S/;
 const EQ_NUMBER = /^\(\s*\d{1,3}(\.\d{1,3})?[a-z]?\s*\)$/;
 const PAGE_NUMBER = /^\s*(?:(?:p[áa]g(?:ina)?|page|p)\.?\s*)?[-–—(\[]?\s*(\d{1,4}|[ivxlcdm]{1,6})\s*[-–—)\]]?(?:\s*(?:\/|de|of)\s*\d{1,4})?\s*$/i;
@@ -148,49 +148,187 @@ function modeSize(chars) {
 
 // ---------------------------------------------------------------- spans
 function segmentsOf(chars, main) {
-  const normal = chars.filter((c) => Math.abs(charSize(c) - main) <= main * 0.12).map((c) => c.y1);
+  // The text size: the biggest one a fair share of the glyphs have. (In "MnO2(s) + CO2(g)"
+  // the indices outnumber the letters.)
+  const tally = new Map();
+  for (const c of chars) { const k = Math.round(charSize(c) * 2) / 2; tally.set(k, (tally.get(k) || 0) + 1); }
+  for (const [s, n] of tally) if (n >= Math.max(2, chars.length * 0.2) && s > main) main = s;
+  const normal = chars.filter((c) => Math.abs(charSize(c) - main) <= main * 0.05).map((c) => c.y1);
   const base = median(normal.length ? normal : chars.map((c) => c.y1));
   const gaps = [];
   for (let i = 1; i < chars.length; i++) if (chars[i].space < 2) gaps.push(chars[i].x0 - chars[i - 1].x1);
   const tracking = gaps.length >= 3 ? Math.max(0, median(gaps)) : 0;
   const wordGap = tracking + Math.max(main, 1) * WORD_GAP_EM;
+  const kinds = chars.map((ch) => {
+    if (charSize(ch) < main * 0.86) {
+      if (base - ch.y1 > main * 0.2) return "sup";
+      if (ch.y1 - base > main * 0.08) return "sub";
+    } else if (charSize(ch) < main * 0.96) { // barely smaller ("cm³" at 90 %): the shift must be clear
+      if (base - ch.y1 > main * 0.25) return "sup";
+      if (ch.y1 - base > main * 0.15) return "sub";
+    }
+    return "n";
+  });
+  // A glyph of another font inside an index ("(ℓ)" with a script l) follows its neighbours.
+  for (let k = 1; k < chars.length - 1; k++) {
+    const offLine = Math.abs(chars[k].y1 - base) > main * 0.08; // ("O" in "H2O2" stays on the line)
+    if (kinds[k] === "n" && offLine && kinds[k - 1] !== "n" && kinds[k - 1] === kinds[k + 1] &&
+        Math.max(chars[k].x0 - chars[k - 1].x1, chars[k + 1].x0 - chars[k].x1) <= main * 0.2) kinds[k] = kinds[k - 1];
+  }
   const out = [];
   let prev = null;
-  for (const ch of chars) {
-    let kind = "n";
-    if (charSize(ch) < main * 0.86) {
-      if (base - ch.y1 > main * 0.2) kind = "sup";
-      else if (ch.y1 - base > main * 0.08) kind = "sub";
-    }
+  chars.forEach((ch, k) => {
+    const kind = kinds[k];
     const gap = prev ? ch.x0 - prev.x1 : 0;
     let space = prev !== null && (ch.space === 2 || gap > wordGap || (ch.space && gap > wordGap * 0.6));
     if (ch.c === "," && ch.space < 2) space = false; // a gap left by an inline icon ("Wu [iD], Fellow")
+    if (kind !== "n" && gap <= main * 0.35) space = false; // an exponent hugs its base ("x²")
     if (out.length && out[out.length - 1][0] === kind) out[out.length - 1][1] += (space ? " " : "") + ch.c;
     else {
       if (space && out.length) out[out.length - 1][1] += " ";
       out.push([kind, ch.c]);
     }
     prev = ch;
-  }
+  });
   return out;
 }
 
+// Fractions and radicals are drawn, not typed: a numerator, a rule, a denominator; a root sign
+// made of strokes over its radicand. Read as plain glyphs they come out as "5 12" and "10 2".
+// The geometry says what they are, so they are put back on the line as "5⁄12" and "10√2"
+// (and later written as \frac{5}{12}, \sqrt{2} in LaTeX).
+const FRACTION_SLASH = String.fromCharCode(0x2044); // numerator ⁄ denominator, until the text is written out
+const FRACTION_END = String.fromCharCode(0x2064); // invisible: where the denominator stops ("1⁄2" + "O2", not "1⁄2O")
+// The typeset marks as readable text: "1⁄2" + end mark + "O" -> "1/2 O".
+const plainMath = (text) => text.replaceAll(FRACTION_SLASH, "/")
+  .replace(new RegExp(`${FRACTION_END}(?=[\\p{L}\\d])`, "gu"), " ").replaceAll(FRACTION_END, "");
+const GROUPING = new Set([..."+-−–±·×÷=<>,;"]);
+const mathGroup = (group) => group.length > 1 && group.slice(1).some((c) => GROUPING.has(c.c) || c.space);
+function typesetMath(chars, g) {
+  const seen = new Set();
+  const rules = [];
+  for (const [y, a, b] of g.hrules) {
+    if (b - a < 3 || b - a > 220) continue;
+    const r = [Math.round(y * 10) / 10, Math.round(a * 10) / 10, Math.round(b * 10) / 10];
+    if (!seen.has(r.join())) { seen.add(r.join()); rules.push(r); }
+  }
+  if (!chars.length || !rules.length || rules.length > 500) return chars;
+  rules.sort((p, q) => p[0] - q[0] || p[1] - q[1] || p[2] - q[2]);
+  const size = (c) => c.y1 - c.y0, cx = (c) => (c.x0 + c.x1) / 2, cy = (c) => (c.y0 + c.y1) / 2;
+  const gone = new Set(), put = new Map(), after = new Map();
+  const drawn = []; // where a sign's strokes are
+  const glyph = (c, x0, y0, x1, y1, like, space = 0) => ({ ...like, c, x0, y0, x1, y1, space, newline: false });
+  // Glyphs on the same row right beside the rule: the row is a line of text, and the rule
+  // an underline or a table border.
+  const rowGoesOn = (idx, x0, x1, sz) => {
+    const members = new Set(idx);
+    const mid = median(idx.map((i) => cy(chars[i])));
+    return chars.some((c, i) => !members.has(i) && Math.abs(cy(c) - mid) < sz * 0.25 &&
+      Math.abs(size(c) - sz) <= sz * 0.06 && // (an index beside it is not its row)
+      ((x0 - sz * 1.5 <= c.x1 && c.x1 <= x0 + 0.5) || (x1 - 0.5 <= c.x0 && c.x0 <= x1 + sz * 1.5)));
+  };
+  for (const [y, x0, x1] of rules) {
+    const num = [], den = [];
+    chars.forEach((c, i) => {
+      if (gone.has(i) || put.has(i) || !(x0 - 1 <= cx(c) && cx(c) <= x1 + 1)) return;
+      if (Math.abs(c.y1 - y) <= size(c) * 0.3 && cy(c) < y) num.push(i);
+      else if (Math.abs(c.y0 - y) <= size(c) * 0.3 && cy(c) > y) den.push(i);
+    });
+    if (!den.length || num.length > 40 || den.length > 40) continue;
+    const sz = median([...num, ...den].map((i) => size(chars[i])));
+    const span = (part) => Math.max(...part.map((i) => chars[i].x1)) - Math.min(...part.map((i) => chars[i].x0));
+    const width = Math.max(...[num, den].filter((p) => p.length).map(span));
+    if (num.length) { // --- a fraction
+      if (x1 - x0 > width + sz * 1.5 || rowGoesOn(num, x0, x1, sz) || rowGoesOn(den, x0, x1, sz)) continue;
+      const first = Math.min(...num, ...den);
+      const parts = [];
+      for (const part of [num, den]) {
+        const group = part.map((i) => chars[i]).sort((a, b) => a.x0 - b.x0);
+        const wrap = mathGroup(group);
+        if (part === den) parts.push([FRACTION_SLASH, chars[first]]);
+        if (wrap) parts.push(["(", group[0]]);
+        for (const c of group) parts.push([c.c, c]);
+        if (wrap) parts.push([")", group[0]]);
+      }
+      parts.push([FRACTION_END, chars[first]]);
+      const step = (x1 - x0) / parts.length;
+      put.set(first, parts.map(([t, like], k) => glyph(t, x0 + k * step, y - sz / 2, x0 + (k + 1) * step - 0.01, y + sz / 2, like, k ? 0 : 1)));
+      for (const i of [...num, ...den]) if (i !== first) gone.add(i);
+      drawn.push([x0 - 0.5, y - 0.5, x1 + 0.5, y + 0.5]);
+      continue;
+    }
+    // --- a root: the rule is the bar over the radicand, with the hook of the sign on its
+    // left and nothing closing it below (that would be a box or a table cell).
+    if (x1 - x0 > width + sz * 0.8) continue;
+    const top = Math.min(...den.map((i) => chars[i].y0)), bottom = Math.max(...den.map((i) => chars[i].y1));
+    // (The strokes of the hook come as thin rules or as small slanted drawings.)
+    const strokes = [
+      ...g.vrules.filter(([x, ya, yb]) => x0 - sz * 1.2 <= x && x <= x0 + 2 && ya < bottom && yb > top).map(([x, ya, yb]) => [x, yb - ya]),
+      ...g.ink.filter((b) => x0 - sz * 1.2 <= b[0] && b[2] <= x0 + 2 && b[1] < bottom && b[3] > top).map((b) => [b[0], b[3] - b[1]]),
+    ];
+    const hook = strokes.some(([, h]) => h >= sz * 0.4) ? strokes.map(([x]) => x) : [];
+    const closed = g.hrules.some(([yy, a, b]) => bottom - sz * 0.3 <= yy && yy <= bottom + sz * 0.5 && Math.min(b, x1) - Math.max(a, x0) >= (x1 - x0) * 0.5);
+    if (!hook.length || Math.min(...hook) > x0 - sz * 0.12 || closed) continue;
+    drawn.push([Math.min(...hook) - 1, top - 2, x1 + 1, bottom + 2]);
+    const group = [...den].sort((a, b) => chars[a].x0 - chars[b].x0);
+    const head = chars[group[0]];
+    const wrap = mathGroup(group.map((i) => chars[i])) || (group.length > 1 && !group.every((i) => /\d/.test(chars[i].c)));
+    // The sign starts where its hook does: no gap, no space, after "10" in "10√2".
+    const sign = [glyph("√", Math.min(...hook), head.y0, head.x0 - 0.04, head.y1, head, 0)];
+    if (wrap) sign.push(glyph("(", head.x0 - 0.03, head.y0, head.x0 - 0.02, head.y1, head));
+    put.set(group[0], [...sign, { ...head, space: 0 }]);
+    if (wrap) {
+      const tail = chars[group[group.length - 1]]; // (on the line, even after an exponent)
+      after.set(group[group.length - 1], [glyph(")", tail.x1 + 0.01, head.y0, tail.x1 + 0.02, head.y1, head)]);
+    }
+  }
+  if (!put.size) return chars;
+  // The strokes of these signs are not table borders, nor a drawing.
+  const sign = (box) => drawn.some((d) => inside(box, d));
+  g.hrules = g.hrules.filter(([y, a, b]) => !sign([a, y, b, y]));
+  g.vrules = g.vrules.filter(([x, a, b]) => !sign([x, a, x, b]));
+  g.ink = g.ink.filter((b) => !sign(b));
+  const out = [];
+  chars.forEach((c, i) => {
+    if (gone.has(i)) return;
+    out.push(...(put.get(i) || [c]), ...(after.get(i) || []));
+  });
+  return out;
+}
+const bare = (group) => (group.startsWith("(") && group.endsWith(")") ? group.slice(1, -1) : group);
+// "5⁄12" -> "\frac{5}{12}", "√(x+1)" -> "\sqrt{x+1}"
+function mathLatex(text) {
+  return text
+    .replace(/\\sqrt\s*(\([^()]*\)|\d+|[\p{L}\d])/gu, (_, a) => `\\sqrt{${bare(a)}}`)
+    .replace(/(\([^()]*\)|[^\s()⁄⁤]+)⁄(\([^()]*\)|[^\s()⁄⁤]+)⁤?/g, (_, a, b) => `\\frac{${bare(a)}}{${bare(b)}}`);
+}
+// "x²+ y²= 4": an operator spaced on one side only gets its other space.
+const operatorGaps = (t) => t
+  .replace(/(?<=[\p{L}\d)\]²³])([=+−<>≤≥≠]) (?=\S)/gu, " $1 ")
+  .replace(/(?<=\S) ([=+−<>≤≥≠])(?=[\p{L}\d(\[√])/gu, " $1 ");
+
 export function segmentsText(segs) {
-  return segs
+  return operatorGaps(plainMath(segs
     .map(([kind, text]) => {
       if (kind === "n") return text;
+      const state = kind === "sub" ? /\((s|l|ℓ|g|aq|v|c)\)$/.exec(text.trim()) : null;
+      if (state) { // "CO2(g)": the index, then the state of matter written plainly
+        const head = text.trim().slice(0, state.index);
+        const lowered = head ? mapChars(head, SUB_FROM, SUB_TO) : "";
+        if (lowered !== null) return lowered + state[0];
+      }
       const conv = kind === "sup" ? mapChars(text, SUP_FROM, SUP_TO) : mapChars(text, SUB_FROM, SUB_TO);
       if (conv !== null) return conv;
       const t = text.trim();
       const mark = kind === "sup" ? "^" : "_";
       return t.length === 1 ? mark + t : `${mark}(${t})`;
     })
-    .join("");
+    .join("")));
 }
 function segmentsLatex(segs) {
   return segs
     .map(([kind, text]) => {
-      const body = latexEscape(kind === "n" ? text : text.trim());
+      const body = mathLatex(latexEscape(kind === "n" ? text : text.trim()));
       return kind === "n" ? body : (kind === "sup" ? "^{" : "_{") + body + "}";
     })
     .join("")
@@ -246,7 +384,7 @@ function dropCaps(chars) {
   return out;
 }
 
-function buildSpans(chars, fonts) {
+function buildSpans(chars, fonts, guttersOut = []) {
   chars = dropCaps(chars);
   const raw = [];
   let cur = [];
@@ -280,6 +418,7 @@ function buildSpans(chars, fonts) {
     }
   }
   const gaps = pageGutters(runs);
+  guttersOut.push(...gaps);
   const spans = [];
   for (let line of lines) {
     line = composeAccents(line);
@@ -390,40 +529,93 @@ function mergeFragments(lines) {
   // Where the text of each fragment sits, whatever tall glyph (a big operator, a limit)
   // stretches its box: two lines of a formula-heavy paragraph have overlapping boxes.
   const mids = lines.map((ln) => median(ln.map((c) => (c.y0 + c.y1) / 2)));
-  const order = lines.map((_, i) => i).sort((a, b) => boxes[a][1] - boxes[b][1] || boxes[a][0] - boxes[b][0]);
+  // A merged line is measured by its main fragment (the text), not by the exponent that
+  // happened to be drawn first.
+  const counts = lines.map((ln) => ln.length), mainLen = lines.map((ln) => ln.length);
+  const byPlace = (a, b) => boxes[a][1] - boxes[b][1] || boxes[a][0] - boxes[b][0];
+  const all = lines.map((_, i) => i);
+  // The lines of text first; then each short piece (an exponent, an index, a limit) joins
+  // the line it overlaps most, whichever was drawn first. Between two tight lines, the
+  // index of the upper one and the exponent of the lower one sit at the same height.
+  // (Short pieces set at the text size — "·K", ")" — go before the raised or lowered ones,
+  // so that an exponent finds the letter it belongs to already in place.)
+  const mains = all.filter((i) => counts[i] > 6).sort(byPlace);
+  const typical = median((mains.length ? mains : all).map((i) => sizes[i]));
+  const plain = new Set(all.filter((i) => counts[i] <= 6 && sizes[i] >= typical * 0.95));
+  const order = [...mains, ...[...plain].sort(byPlace), ...all.filter((i) => counts[i] <= 6 && !plain.has(i)).sort(byPlace)];
   const merged = [];
   const out = new Map();
   for (const i of order) {
     const bi = boxes[i];
-    let target = null;
-    for (const j of merged.slice(-6)) {
+    const short = lines[i].length <= 6;
+    let target = null, best = -Infinity;
+    for (const j of short ? merged : merged.slice(-6)) {
       const bj = boxes[j];
       const hi = bi[3] - bi[1], hj = bj[3] - bj[1];
       const h = Math.min(hi, hj);
       const overlap = Math.min(bi[3], bj[3]) - Math.max(bi[1], bj[1]);
+      if (overlap <= 0) continue;
       const touching = bi[0] <= bj[2] + h * SPAN_GAP_EM && bj[0] <= bi[2] + h * SPAN_GAP_EM;
       const level = Math.abs(mids[i] - mids[j]) <= Math.min(sizes[i], sizes[j]) * 0.35;
-      if (overlap >= h * 0.7 && touching && level) { target = j; break; }
+      if (overlap >= h * 0.7 && touching && level) {
+        if (!short) { target = j; break; }
+        if (overlap / h + 1 > best) [target, best] = [j, overlap / h + 1];
+        continue;
+      }
       // A superscript/subscript drawn on its own: smaller glyphs (or a short piece), partly
       // overlapping, glued to the bigger fragment. Two full lines of the same text, one of
       // them taller because of its own scripts, are not that.
-      const glued = bi[0] <= bj[2] + h * 0.4 && bj[0] <= bi[2] + h * 0.4;
       const small = hi <= hj ? i : j;
-      const script = Math.min(sizes[i], sizes[j]) <= Math.max(sizes[i], sizes[j]) * 0.85 || lines[small].length <= 6;
-      if (h <= Math.max(hi, hj) * 0.8 && overlap >= h * 0.2 && glued && script) { target = j; break; }
+      const big = small === i ? j : i; // the script is the piece that is both shorter and set smaller
+      const script = sizes[small] <= sizes[big] * 0.85 || counts[small] <= 6;
+      const lone = counts[small] <= 6 && overlap >= h * 0.35; // an exponent placed on its own
+      if (plain.has(i) || !((h <= Math.max(hi, hj) * 0.8 || lone) && overlap >= h * 0.2 && script)) continue;
+      if (!short) {
+        if (bi[0] <= bj[2] + h * 0.4 && bj[0] <= bi[2] + h * 0.4) { target = j; break; }
+        continue;
+      }
+      // Glued to a glyph of that line, not just somewhere along it.
+      const glyphs = out.get(j).flat();
+      const near = glyphs.some((c) => Math.max(c.x0 - bi[2], bi[0] - c.x1, 0) <= h * 0.5);
+      // An exponent sits in a gap of its own line; over the other line it hangs above (or
+      // below) that line's letters.
+      const reach = Math.max(0.8, (bi[2] - bi[0]) * 0.12);
+      const clash = glyphs.some((c) => Math.min(c.x1, bi[2]) - Math.max(c.x0, bi[0]) > reach);
+      const score = overlap / h - (clash ? 1 : 0);
+      if (near && score > best) [target, best] = [j, score];
     }
     if (target === null) {
       merged.push(i);
       out.set(i, [lines[i]]);
     } else {
       out.get(target).push(lines[i]);
+      counts[target] += lines[i].length;
+      if (sizes[i] > sizes[target] * 1.05 || (sizes[i] >= sizes[target] * 0.98 && lines[i].length > mainLen[target])) {
+        sizes[target] = sizes[i]; mids[target] = mids[i]; mainLen[target] = lines[i].length;
+      }
       const bj = boxes[target];
       boxes[target] = [Math.min(bj[0], bi[0]), Math.min(bj[1], bi[1]), Math.max(bj[2], bi[2]), Math.max(bj[3], bi[3])];
     }
   }
+  // A line cut into pieces by its own indices ("H", "2", "O", "2(aq)", "+ I"…): pieces on
+  // one baseline that now touch, with their indices attached, are that line.
+  merged.sort(byPlace);
+  for (let k = 0; k < merged.length;) {
+    const a = merged[k];
+    const b = merged.slice(k + 1).find((x) => {
+      const size = Math.min(sizes[a], sizes[x]);
+      return Math.abs(mids[a] - mids[x]) <= size * 0.2 && Math.abs(sizes[a] - sizes[x]) <= size * 0.15 &&
+        Math.max(boxes[x][0] - boxes[a][2], boxes[a][0] - boxes[x][2]) <= size * 0.9;
+    });
+    if (b === undefined) { k++; continue; }
+    out.get(a).push(...out.get(b));
+    out.delete(b);
+    const ba = boxes[a], bb = boxes[b];
+    boxes[a] = [Math.min(ba[0], bb[0]), Math.min(ba[1], bb[1]), Math.max(ba[2], bb[2]), Math.max(ba[3], bb[3])];
+    merged.splice(merged.indexOf(b), 1);
+  }
   return merged.map((i) => orderLine(out.get(i)));
 }
-
 const isMarker = (text) => {
   const t = text.trim();
   return (t.length === 1 && BULLETS.has(t)) || new RegExp(ENUM.source + "$").test(t);
@@ -432,12 +624,14 @@ const isMarker = (text) => {
 // (An equation number at the end of a column is not the marker of the next column's line.)
 function joinMarkers(spans, gaps = []) {
   const out = [];
+  const left = spans.length ? Math.min(...spans.map((s) => s.x0)) : 0;
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i];
     if (i + 1 < spans.length && isMarker(s.text)) {
       const nxt = spans[i + 1];
       const sameRow = Math.min(s.y1, nxt.y1) - Math.max(s.y0, nxt.y0) > Math.min(s.height, nxt.height) * 0.4;
-      const overGutter = gaps.some(([g0, g1]) => s.x1 <= g0 + 2.5 && nxt.x0 >= g1 - 2.5);
+      // (A gutter has a column of text on its left; the gap after "a)" has only "a)".)
+      const overGutter = gaps.some(([g0, g1]) => s.x1 <= g0 + 2.5 && nxt.x0 >= g1 - 2.5 && g0 - left >= 100);
       if (sameRow && !overGutter && nxt.x0 - s.x1 >= 0 && nxt.x0 - s.x1 < Math.max(s.size, 6) * 4) {
         nxt.chars[0].space = 2;
         out.push(new Span([...s.chars, ...nxt.chars], s.fonts));
@@ -494,7 +688,7 @@ function tableRow(band) {
   const spans = band.filter((a) => a.kind === "span").map((a) => a.span);
   return spans.length >= 3 && spans.length === band.length && spans.every((s) => s.text.length < TEXT_LIKE_CHARS);
 }
-function splitColumns(items, minGap) {
+function splitColumns(items, minGap, pageGaps = []) {
   if (items.length < 2) return null;
   const cols = [];
   let rest = items;
@@ -509,7 +703,10 @@ function splitColumns(items, minGap) {
     let run = 0, longest = 0;
     for (const hit of across) { run = hit ? run + 1 : 0; longest = Math.max(longest, run); }
     const cutsTable = longest >= 3 || (across.length > 0 && across.every(Boolean));
-    if (left.length && right.length && !cutsTable && textLike(left) && textLike(right)) {
+    // The page's own gutter splits even when one side is not prose (the labels of a chart).
+    // (Never through the rows of a table, however few.)
+    const known = (textLike(left) || textLike(right)) && !across.some(Boolean) && pageGaps.some(([a, b]) => Math.min(b, g1) - Math.max(a, g0) >= (b - a) * 0.5);
+    if (left.length && right.length && !cutsTable && (known || (textLike(left) && textLike(right)))) {
       cols.push(left);
       rest = right;
     }
@@ -518,11 +715,11 @@ function splitColumns(items, minGap) {
   cols.push(rest);
   return cols;
 }
-function readingOrder(items, minGap) {
+function readingOrder(items, minGap, pageGaps = []) {
   if (!items.length) return [];
   if (items.length === 1) return [items];
-  const cols = splitColumns(items, minGap);
-  if (cols) return cols.flatMap((c) => readingOrder(c, minGap));
+  const cols = splitColumns(items, minGap, pageGaps);
+  if (cols) return cols.flatMap((c) => readingOrder(c, minGap, pageGaps));
   const bands = bandsOf(items);
   if (bands.length === 1) return [[...items].sort((a, b) => a.x0 - b.x0)];
   const groups = [bands[0]];
@@ -533,13 +730,13 @@ function readingOrder(items, minGap) {
     // Look two bands ahead: a short heading on a column ("Abstract") proves itself with the lines below.
     const ahead = bands.slice(k + 1, k + 3).flat();
     if (tableRow(band) && !tableRow(last.slice(-1))) groups.push(band);
-    else if (splitColumns(union, minGap) || (ahead.length && splitColumns([...union, ...ahead], minGap))) groups[groups.length - 1] = union;
+    else if (splitColumns(union, minGap, pageGaps) || (ahead.length && splitColumns([...union, ...ahead], minGap, pageGaps))) groups[groups.length - 1] = union;
     else groups.push(band);
   }
   const out = [];
   for (const g of groups) {
     if (g.length === items.length) out.push(...bandsOf(g).map((b) => b.sort((a, c) => a.x0 - c.x0)));
-    else out.push(...readingOrder(g, minGap));
+    else out.push(...readingOrder(g, minGap, pageGaps));
   }
   return out;
 }
@@ -943,6 +1140,8 @@ class Line {
     // By glyph: a line with a few words in bold is not a bold line.
     const all = spans.flatMap((s) => s.chars.map((c) => s.fonts[c.font].bold));
     this.bold = all.filter(Boolean).length >= all.length * 0.9;
+    const slanted = spans.flatMap((s) => s.chars.map((c) => s.fonts[c.font].italic));
+    this.italic = slanted.filter(Boolean).length >= slanted.length * 0.9;
     this.mono = spans.every((s) => s.mono);
     const n = sum(spans.map((s) => s.chars.length));
     this.math = sum(spans.map((s) => s.math * s.chars.length)) / Math.max(n, 1);
@@ -999,6 +1198,16 @@ function rightEdges(lines) {
     if (beside.length) edge = Math.min(edge, Math.max(a.x1, Math.min(...beside) - size));
     out.set(a, edge);
   }
+  // A line that ends exactly where the line above or below does is a full line of a
+  // justified block (an abstract set narrower than the body text): it wrapped.
+  lines.forEach((a, i) => {
+    for (const b of [lines[i - 1], lines[i + 1]]) {
+      if (!b || Math.abs(b.x1 - a.x1) > 1.5) continue;
+      const size = Math.max(a.size, 4);
+      const near = Math.min(Math.abs(b.y0 - a.y1), Math.abs(a.y0 - b.y1)) < size * 1.5;
+      if (near && Math.min(a.x1 - a.x0, b.x1 - b.x0) > size * 8) out.set(a, a.x1);
+    }
+  });
   return out;
 }
 function joinLines(lines, edges = new Map()) {
@@ -1062,7 +1271,7 @@ function runsOf(group, edges) {
         prior = piece[piece.length - 1];
         const lead = spaced && last &&!/[ \n]$/.test(last.text) ? " " : "";
         segmentsOf(piece, span.size).forEach(([kind, text], i) =>
-          add((i === 0 ? lead : "") + text, !!f.bold, !!f.italic, kind === "n" ? null : kind === "sup" ? "super" : "sub"));
+          add((i === 0 ? lead : "") + plainMath(text), !!f.bold, !!f.italic, kind === "n" ? null : kind === "sup" ? "super" : "sub"));
         piece = [];
       };
       for (const ch of span.chars) {
@@ -1174,7 +1383,8 @@ function linesToBlocks(lines) {
       else if (kind === "list_item") {
         // Wrapped item text: indented under the text, or flush with the marker right after a full line.
         const wrapped = ln.x0 >= group[0].x0 - 2 && prev.x1 >= Math.max(...group.map((g) => g.x1)) - size * 2;
-        cont = cont && (ln.x0 >= group[0].x0 + size * 0.3 || wrapped);
+        // ("A. Related Work" in italics, then its paragraph in upright type: two blocks.)
+        cont = cont && (ln.x0 >= group[0].x0 + size * 0.3 || wrapped) && !hardBreak(prev, ln, edges) && !(group[0].italic && !ln.italic);
       }
       else {
         const shortPrev = prev.x1 < Math.max(...group.map((g) => g.x1)) - size * 2.5;
@@ -1226,6 +1436,9 @@ function newBlock(type, bbox, extra = {}) {
 }
 
 // ---------------------------------------------------------------- pdf.js readers
+// By font name. URW's "Medi" is its bold cut; Computer Modern has cmbx (bold) and cmti (italic).
+const BOLD_NAME = /bold|black|heavy|semibold|demi|medi(ital)?$|^cmbx|^cmb\d/;
+const ITALIC_NAME = /italic|oblique|ital$|^cmti|^cmsl/;
 const IDENTITY = [1, 0, 0, 1, 0, 0];
 const mul = (m, n) => pdfjsLib.Util.transform(m, n);
 const apply = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
@@ -1241,8 +1454,8 @@ async function fontInfo(page, fontName, style) {
   const low = name.toLowerCase().split("+").pop();
   return {
     name,
-    bold: /bold|black|heavy|semibold|demi/.test(low),
-    italic: /italic|oblique/.test(low),
+    bold: BOLD_NAME.test(low),
+    italic: ITALIC_NAME.test(low),
     math: isMathFont(low),
     mono: /mono|courier|consol|menlo|inconsolata/.test(low) || style?.fontFamily === "monospace",
   };
@@ -1276,8 +1489,8 @@ function readGlyphs(page, viewport, ops, tex = false) {
       fontIndex.set(st.key, fi);
       fonts.push({
         name, obj: f,
-        bold: !!f?.bold || !!f?.black || /bold|black|heavy|semibold|demi/.test(low),
-        italic: !!f?.italic || /italic|oblique/.test(low),
+        bold: !!f?.bold || !!f?.black || BOLD_NAME.test(low),
+        italic: !!f?.italic || ITALIC_NAME.test(low),
         math: isMathFont(low),
         mono: /mono|courier|consol|menlo|inconsolata/.test(low),
         tex: texEncoding(name),
@@ -1569,7 +1782,9 @@ async function analyzePage(pdf, number, opts) {
   }
   chars = visibleOnly(chars, g);
   rotated = visibleOnly(rotated, g);
-  let spans = chars.length ? buildSpans(chars, fonts) : [];
+  chars = typesetMath(chars, g);
+  const pageGaps = [];
+  let spans = chars.length ? buildSpans(chars, fonts, pageGaps) : [];
   const rotSpans = groupRotated(rotated).map((grp) => new Span(grp, fonts, true));
   const sizes = new Map();
   for (const c of chars) { const k = Math.round(charSize(c) * 2) / 2; sizes.set(k, (sizes.get(k) || 0) + 1); }
@@ -1585,7 +1800,8 @@ async function analyzePage(pdf, number, opts) {
 
   const atoms = spans.map((s) => atom("span", s.x0, s.y0, s.x1, s.y1, { span: s }));
   for (const b of [...tables, ...figures]) atoms.push(atom(b.type, ...b.bbox, { block: b }));
-  const bands = readingOrder(atoms, Math.max(GUTTER_MIN, body * 0.8));
+  // Text is set in two or three columns; more gutters than that are a table's.
+  const bands = readingOrder(atoms, Math.max(GUTTER_MIN, body * 0.8), pageGaps.length <= 2 ? pageGaps : []);
 
   const blocks = [];
   let pendingLines = [];
@@ -1652,11 +1868,54 @@ function markFurniture(pages) {
       if (z === "margin") b.type = "header";
       else if (b.type !== "figure" && PAGE_NUMBER.test(b.text.trim())) b.type = "page_number";
       else if (pages.length >= 2 && (counts.get(z + "|" + k) || 0) >= (b.type === "figure" ? 2 : need) && k.length >= 3) b.type = z;
+      else if (pages.length >= 2 && b.type !== "figure") {
+        // A running stamp glued to another line of the margin ("©2026 IEEE" + "Authorized…").
+        for (const [ck, n] of counts) {
+          const stamp = ck.slice(ck.indexOf("|") + 1);
+          if (n >= need && ck.startsWith(z + "|") && stamp.length >= 20 && stamp.length >= k.length * 0.5 && k.includes(stamp)) { b.type = z; break; }
+        }
+      }
     }
+}
+
+// The height of a glyph box depends on the font's metrics: a 14 pt bold title can come out
+// shorter than 12 pt author names. Blocks are compared by their real size instead, scaled so
+// that body text keeps its box height.
+function normalizeSizes(pages, body) {
+  const weight = new Map();
+  for (const p of pages) for (const b of p.blocks) {
+    if (!b.pt || !b.text || b.type !== "paragraph") continue;
+    const k = Math.round(b.pt * 2) / 2;
+    weight.set(k, (weight.get(k) || 0) + b.text.length);
+  }
+  let bodyPt = 0, best = 0;
+  for (const [k, n] of weight) if (n > best) [bodyPt, best] = [k, n];
+  if (!bodyPt) return;
+  for (const p of pages) for (const b of p.blocks) if (b.pt && b.font_size) b.font_size = (b.pt / bodyPt) * body;
 }
 
 function classifyHeadings(pages, body) {
   const candidates = [];
+  // Between the title and the abstract of the first page: authors and affiliations, often
+  // set bigger than the body, but not headings.
+  const front = new Set();
+  const first = pages[0];
+  if (first && first.number === 1) {
+    const size = (b) => b.font_size || body;
+    const text = first.blocks.filter((b) => b.type === "paragraph" && b.text);
+    const titleSize = Math.max(body, ...text.map(size));
+    const ti = first.blocks.findIndex((b) => b.type === "paragraph" && b.text && size(b) >= titleSize * 0.98);
+    const abstract = first.blocks.find((b, i) => i > ti && b.bbox && b.text && /^(abstract|resumo|summary)/i.test(b.text.trim()));
+    const title = first.blocks[ti];
+    if (titleSize >= body * 1.3 && title?.bbox && abstract) {
+      for (const b of first.blocks) {
+        if (b !== title && b.bbox && b.bbox[1] >= title.bbox[3] - 2 && b.bbox[3] <= abstract.bbox[1] + 2 && size(b) < titleSize * 0.9) front.add(b);
+      }
+    }
+  }
+  // "TABLE I" on a line of its own, and the lines in capitals right under it: a caption.
+  const titles = new Set();
+  const tableTitle = (prev) => !!prev && (titles.has(prev) || /^(table|tabela|quadro)\s+[ivxlc\d]+\.?$/i.test((prev.text || "").trim()));
   for (const p of pages) {
     p.blocks.forEach((b, i) => {
       // A one-line "list item" set bold or bigger than the body is a numbered section heading.
@@ -1665,24 +1924,40 @@ function classifyHeadings(pages, body) {
         const l = [...b.text].filter((c) => /\p{L}/u.test(c));
         return /^[IVX]{1,4}\.$/.test(b.marker) && l.length >= 4 && l.every((c) => c === c.toUpperCase() && c !== c.toLowerCase());
       };
-      if (b.type === "list_item" && !neighbours.includes("list_item") && b.lines === 1 && b.marker && b.text.length <= 80 &&
-          (romanCaps() || (/^\d/.test(b.marker) &&
-            ((b.font_size || body) >= body * 1.25 || (b.bold && !/\.$/.test(b.text.trimEnd())))))) {
+      const letterTitle = () => { // "A. Image Denoising": a subsection, set in Title Case
+        if (!/^[A-Z]\.$/.test(b.marker) || b.text.length > 70 || /[.,;:]$/.test(b.text.trimEnd())) return false;
+        const listed = [p.blocks[i - 1], p.blocks[i + 1]].some((x) => x && x.type === "list_item" && /^[A-Z]\.$/.test(x.marker || ""));
+        return !listed && /^\p{Lu}/u.test(b.text) && b.text.split(/\s+/).length <= 10;
+      };
+      // "3. Method" / "3.1. Setup" in bold and bigger than the body: sections, even one
+      // right after the other.
+      const boldSection = b.type === "list_item" && b.bold && /^\d+(\.\d+)*\.?$/.test(b.marker || "") && b.lines <= 2 &&
+        b.text.length <= 120 && !/\.$/.test(b.text.trimEnd()) && (b.font_size || body) >= body * 1.05;
+      const oneLine = b.type === "list_item" && b.lines === 1 && b.marker && b.text.length <= 80;
+      const titled = !!oneLine && (romanCaps() || letterTitle()); // a title by its form
+      if (boldSection || titled || (oneLine && !neighbours.includes("list_item") &&
+          ((/^\d/.test(b.marker) &&
+            ((b.font_size || body) >= body * 1.25 || (b.bold && !/\.$/.test(b.text.trimEnd()))))))) {
+        if (b.runs?.length) b.runs[0].text = `${b.marker} ${b.runs[0].text}`; // the number is part of the title
         b.text = `${b.marker} ${b.text}`;
         b.type = "paragraph";
         delete b.marker;
       }
       if (b.type !== "paragraph" || !b.text) return;
+      if (titled) { candidates.push([b, "bold"]); return; }
       const text = b.text.trim();
       if (b.lines > 3 || text.length > 200 || /[,;]$/.test(text) || CAPTION.test(text)) return;
+      if (!/\p{L}{3}/u.test(text)) return; // axis ticks, a lone number: not a title
+      if (front.has(b)) return;
       const size = b.font_size || body;
       const nxt = p.blocks.slice(i + 1).find((x) => !FURNITURE.has(x.type));
       const letters = [...text].filter((c) => /\p{L}/u.test(c));
       const caps = letters.length >= 4 && letters.every((c) => c === c.toUpperCase() && c !== c.toLowerCase()) && text.length <= 90;
-      const kv = KEY_VALUE.test(text);
+      const kv = KEY_VALUE.test(text) && size < body * 1.4; // "FCR: Robust…" in title size is a title
       if (size >= body * 1.18 && !kv) candidates.push([b, "size"]);
       else if (kv) return;
       else if (b.bold && text.length <= 140 && b.lines <= 2 && !text.endsWith(".") && (!nxt || !nxt.bold || nxt.type !== "paragraph")) candidates.push([b, "bold"]);
+      else if (caps && tableTitle(p.blocks[i - 1])) { b.type = "caption"; titles.add(b); }
       else if (caps && b.lines === 1 && !text.endsWith(".")) candidates.push([b, "caps"]);
     });
   }
@@ -1698,12 +1973,127 @@ function classifyHeadings(pages, body) {
     const m = NUMBERED_HEADING.exec(b.text);
     if (m && why !== "size") b.level = Math.min(6, Math.max(b.level, (m[1].match(/\./g) || []).length + 1 + (top ? 1 : 0)));
   }
+  // A title set on two lines (centred, or cut at a hyphen) is one heading.
+  const numbered = (t) => NUMBERED_HEADING.test(t) || /^([IVX]{1,4}|[A-Z])\.\s/.test(t) || /^(appendix|ap[eê]ndice|anexo)\b/i.test(t);
+  for (const p of pages) {
+    const out = [];
+    for (const b of p.blocks) {
+      const a = out[out.length - 1];
+      if (a && a.type === "heading" && b.type === "heading" && a.level === b.level && a.bbox && b.bbox && !numbered(b.text) &&
+          Math.abs((a.font_size || body) - (b.font_size || body)) <= body * 0.1 && !!a.bold === !!b.bold &&
+          b.bbox[1] - a.bbox[3] < (b.font_size || body) * 0.9 && b.bbox[1] >= a.bbox[1] &&
+          Math.min(a.bbox[2], b.bbox[2]) - Math.max(a.bbox[0], b.bbox[0]) > 0) {
+        a.text = /\p{L}-$/u.test(a.text) ? a.text.slice(0, -1) + b.text : `${a.text} ${b.text}`;
+        a.bbox = [Math.min(a.bbox[0], b.bbox[0]), a.bbox[1], Math.max(a.bbox[2], b.bbox[2]), Math.max(a.bbox[3], b.bbox[3])];
+        a.lines = (a.lines || 1) + (b.lines || 1);
+        delete a.runs; // one style for the whole title
+        if (a.line_boxes && b.line_boxes) a.line_boxes = [...a.line_boxes, ...b.line_boxes];
+        continue;
+      }
+      out.push(b);
+    }
+    p.blocks = out;
+  }
+}
+
+// A displayed formula is drawn in pieces: the big "∑", its limits, the body. Pieces of one
+// or two glyphs that ended up as blocks of their own go back into the formula beside them.
+function absorbFormulaBits(page) {
+  const bit = (b) => b.type === "paragraph" && b.bbox && b.text.trim().length <= 2 && !/^[\p{L}]{2}$/u.test(b.text.trim());
+  const keep = [];
+  for (const b of page.blocks) {
+    if (!bit(b)) { keep.push(b); continue; }
+    const size = Math.max(b.bbox[3] - b.bbox[1], 6);
+    let best = null, bestGap = Infinity;
+    for (const f of page.blocks) {
+      if (f.type !== "formula" || !f.bbox) continue;
+      const dx = Math.max(f.bbox[0] - b.bbox[2], b.bbox[0] - f.bbox[2], 0);
+      const dy = Math.max(f.bbox[1] - b.bbox[3], b.bbox[1] - f.bbox[3], 0);
+      if (dx <= size * 1.5 && dy <= size * 1.2 && dx + dy < bestGap) [best, bestGap] = [f, dx + dy];
+    }
+    if (!best) { keep.push(b); continue; }
+    const t = b.text.trim();
+    const before = b.bbox[2] <= best.bbox[0] + 2;
+    best.text = before ? `${t} ${best.text}` : `${best.text} ${t}`;
+    if (best.latex) best.latex = before ? `${latexEscape(t)} ${best.latex}` : `${best.latex} ${latexEscape(t)}`;
+    best.bbox = [Math.min(best.bbox[0], b.bbox[0]), Math.min(best.bbox[1], b.bbox[1]), Math.max(best.bbox[2], b.bbox[2]), Math.max(best.bbox[3], b.bbox[3])];
+  }
+  page.blocks = keep;
+}
+
+// A figure made of several pictures with labels around them (sub-titles, "(a)", axis ticks):
+// what is stacked right above a "Figure N" caption, down to the caption, is one figure.
+const FIGURE_CAPTION = /^(fig|gr[aá]fico|chart|imagem|image|esquema|diagram)/i;
+function composeFigures(page, body) {
+  const live = (b) => b.bbox && !FURNITURE.has(b.type);
+  const cols = columns(page.blocks.filter((b) => live(b) && b.type !== "figure").map((b) => b.bbox));
+  const isCaption = (b) => ["paragraph", "heading", "caption"].includes(b.type) && captionText(b.text.trim());
+  const label = (b, first = false) => {
+    if (b.type === "figure") return true;
+    if (isCaption(b)) return false;
+    const t = b.text || "";
+    if (b.type === "table") return t.length <= 400 || first; // right above the caption: a chart
+    if (b.type === "heading" && /\p{L}{3}/u.test(t) && (NUMBERED_HEADING.test(t) || /^[IVX]+\.\s/.test(t))) return false;
+    return ((b.lines || 1) <= 2 && t.length <= 60) || ((b.font_size || body) < body * 0.88 && t.length <= 250);
+  };
+  // Text printed inside a picture (ticks, legend) is part of it.
+  for (const fig of page.blocks.filter((b) => b.type === "figure" && b.bbox)) {
+    const within = page.blocks.filter((b) => b !== fig && live(b) && b.type !== "figure" && label(b) && inside(b.bbox, fig.bbox, 2));
+    if (!within.length) continue;
+    fig.text = [fig.text, ...within.map((b) => (b.text || "").trim())].filter(Boolean).join(NEWLINE);
+    const gone = new Set(within);
+    page.blocks = page.blocks.filter((b) => !gone.has(b));
+  }
+  for (const cap of page.blocks.filter((b) => live(b) && isCaption(b) && FIGURE_CAPTION.test(b.text.trim()))) {
+    const [left, right] = cols.length ? areaOf(cap.bbox, cols) : [-Infinity, Infinity];
+    const above = page.blocks
+      .filter((b) => b !== cap && live(b) && b.bbox[3] <= cap.bbox[1] + 3 && b.bbox[0] >= left - 3 && b.bbox[2] <= right + 3)
+      .sort((a, b) => b.bbox[3] - a.bbox[3]);
+    let parts = [];
+    let top = cap.bbox[1];
+    for (const b of above) {
+      if (b.bbox[3] < top - 28) break; // white space: the figure ended
+      if (label(b, !parts.length)) { parts.push(b); top = Math.min(top, b.bbox[1]); }
+      else if (b.bbox[3] <= top + 2) break; // body text above
+    }
+    // Under a "Figure" caption, a grid of rules with text is a chart, not a table.
+    let pictures = parts.filter((b) => b.type === "figure");
+    if (!pictures.length) pictures = parts.filter((b) => b.type === "table");
+    if (!pictures.length && parts.length >= 6) pictures = parts; // a chart drawn with no frame: only its labels
+    if (!pictures.length) continue;
+    // Above the topmost picture only its title belongs: centred on a picture, or small print.
+    const pictureTop = Math.min(...pictures.map((b) => b.bbox[1]));
+    parts = parts.filter((b) => {
+      if (pictures.includes(b) || b.bbox[3] > pictureTop + 2) return true;
+      if (b.bbox[3] < pictureTop - 14) return false;
+      const mid = (b.bbox[0] + b.bbox[2]) / 2;
+      const centred = pictures.some((p) => Math.abs((p.bbox[0] + p.bbox[2]) / 2 - mid) <= (p.bbox[2] - p.bbox[0]) * 0.2);
+      return centred || (b.font_size || body) < body * 0.88;
+    });
+    if (parts.length < 2 && parts[0]?.type === "figure") continue;
+    parts.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
+    const bbox = [Math.min(...parts.map((b) => b.bbox[0])), Math.min(...parts.map((b) => b.bbox[1])), Math.max(...parts.map((b) => b.bbox[2])), Math.max(...parts.map((b) => b.bbox[3]))];
+    const text = parts.map((b) => (b.text || "").trim()).filter(Boolean).join("\n");
+    const figure = newBlock("figure", bbox, { text });
+    const at = Math.min(...parts.map((b) => page.blocks.indexOf(b)));
+    const gone = new Set(parts);
+    page.blocks = [...page.blocks.slice(0, at).filter((b) => !gone.has(b)), figure, ...page.blocks.slice(at).filter((b) => !gone.has(b))];
+  }
+}
+
+// "Table 1 presents the results…" is a sentence; "Table 1: Results" and "Table 1 Results" are captions.
+function captionText(t) {
+  const m = CAPTION.exec(t);
+  if (!m) return false;
+  if (/[.:\-–—|]$/.test(m[0].trimEnd())) return true;
+  const rest = t.slice(m[0].length).trimStart();
+  return !rest || !/^\p{Ll}/u.test(rest);
 }
 
 function linkCaptions(page) {
   const targets = page.blocks.filter((b) => (b.type === "figure" || b.type === "table") && b.bbox);
   for (const b of page.blocks) {
-    if (!["paragraph", "heading"].includes(b.type) || !b.bbox || !CAPTION.test(b.text.trim()) || b.text.length > 400) continue;
+    if (!["paragraph", "heading"].includes(b.type) || !b.bbox || !captionText(b.text.trim()) || b.text.length > 900) continue;
     let best = null, dist = Infinity;
     for (const t of targets) {
       if (Math.min(b.bbox[2], t.bbox[2]) - Math.max(b.bbox[0], t.bbox[0]) <= 0) continue;
@@ -1810,8 +2200,11 @@ export async function extractDocument(data, opts = {}) {
 
   const pages = results.map((r) => r.page);
   markFurniture(pages);
+  normalizeSizes(pages, body);
   classifyHeadings(pages, body);
   for (const p of pages) {
+    absorbFormulaBits(p);
+    composeFigures(p, body);
     linkCaptions(p);
     layoutFormat(p);
     p.blocks.forEach((b, n) => {

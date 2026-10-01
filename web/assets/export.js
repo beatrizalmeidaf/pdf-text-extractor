@@ -251,11 +251,22 @@ export async function toXlsx(doc) {
 const TWIP = 20; // per point
 const EMU = 12700; // per point
 const JC = { left: "left", center: "center", right: "right", justify: "both" };
-const WORD_FONT = { Times: "Times New Roman", Helvetica: "Arial", Courier: "Courier New" }; // the PDF base fonts
+// A font Word has, close to the one on the page: the PDF base fonts and the TeX / URW
+// families papers are set in. (An unknown name makes Word fall back to a wider font, and
+// the columns overflow.)
+function wordFont(name) {
+  if (!name) return name;
+  const n = name.toLowerCase().replace(/\s+/g, "");
+  if (/consolas|couriernew|timesnewroman|arial|calibri|cambria|georgia|verdana|tahoma/.test(n)) return name;
+  if (/mono|courier|cmtt|lmmono|typewriter|inconsolata|menlo/.test(n)) return "Courier New";
+  if (/nimbussan|helvet|cmss|lmsans|heros|dejavusans|liberationsans|opensans|^sf(ss|sx)/.test(n)) return "Arial";
+  if (/nimbusrom|^times|^cm(r|bx|ti|sl|csc|mi)|^lm(roman|r\d)|^sf(rm|bx|ti)|stix|termes|libertin|utopia|charter|palatin|minion|garamond/.test(n)) return "Times New Roman";
+  return name;
+}
 
 function docxRuns(b, extraProps = "") {
   const pt = b.style?.pt;
-  const font = WORD_FONT[b.style?.font] || b.style?.font;
+  const font = wordFont(b.style?.font);
   const base = (b.style?.tracking ? `<w:spacing w:val="${Math.round(b.style.tracking * TWIP)}"/>` : "") +
     (pt ? `<w:sz w:val="${Math.round(pt * 2)}"/><w:szCs w:val="${Math.round(pt * 2)}"/>` : "") +
     (font ? `<w:rFonts w:ascii="${xmlEsc(font)}" w:hAnsi="${xmlEsc(font)}" w:cs="${xmlEsc(font)}"/>` : "");
@@ -356,7 +367,14 @@ export async function toDocx(doc) {
   const mLeft = margin(areaLeft);
   const mRight = boxes.length ? margin(W - Math.max(...boxes.map((b) => b[2]))) : 1134;
   const mTop = boxes.length ? margin(Math.min(...boxes.map((b) => b[1])) - 12) : 1134;
-  const mBottom = boxes.length ? margin(H - Math.max(...boxes.map((b) => b[3])) - 12) : 1134;
+  // Some room below the text: Word never breaks lines exactly as the page did, and a line
+  // or two too many should stay on the page instead of opening a new one.
+  const below = boxes.length ? H - Math.max(...boxes.map((b) => b[3])) : 0;
+  const mBottom = boxes.length ? margin(below - 12 - Math.min(40, below * 0.5)) : 1134;
+  // The language Word hyphenates in (the page hyphenated its lines too).
+  const words = doc.pages.slice(0, 5).flatMap((p) => contentBlocks(p)).map((b) => b.text || "").join(" ").toLowerCase().split(/[^\p{L}]+/u);
+  const count = (list) => words.filter((w) => list.includes(w)).length;
+  const language = count(["the", "and", "of", "is", "that", "with", "for"]) > count(["de", "que", "não", "uma", "para", "com", "os", "em"]) ? "en-US" : "pt-BR";
 
   // A run of blocks down one column, `left` being that column's left edge.
   // Returns the bottom of the last block.
@@ -449,11 +467,11 @@ export async function toDocx(doc) {
   const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
   zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body.join("")}${finalSect}</w:body></w:document>`);
   const headingStyles = [1, 2, 3, 4, 5, 6].map((l) => `<w:style w:type="paragraph" w:styleId="Heading${l}"><w:name w:val="heading ${l}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="${l - 1}"/></w:pPr><w:rPr><w:b/><w:sz w:val="${[32, 28, 26, 24, 22, 22][l - 1]}"/></w:rPr></w:style>`).join("");
-  zip.file("word/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>${headingStyles}<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:color w:val="555555"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
+  zip.file("word/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:lang w:val="${language}"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>${headingStyles}<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:color w:val="555555"/><w:sz w:val="20"/></w:rPr></w:style></w:styles>`);
   zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rSettings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>${media.map((_, k) => `<Relationship Id="rImg${k}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${k + 1}.png"/>`).join("")}</Relationships>`);
   zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`);
-  zip.file("word/settings.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`);
+  zip.file("word/settings.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:autoHyphenation/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`);
   return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 }
 

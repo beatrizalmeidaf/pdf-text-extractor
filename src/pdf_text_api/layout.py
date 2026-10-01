@@ -65,7 +65,7 @@ _NUMBERED_HEADING = re.compile(r"^(\d{1,2}(\.\d{1,2}){0,4})\.?\s+\S")
 _CAPTION = re.compile(
     r"^(fig(ura|ure)?|tab(ela|le)?|quadro|gr[aá]fico|chart|imagem|image|"
     r"equa[cç][aã]o|equation|listing|algoritmo|algorithm|esquema|diagrama|diagram)"
-    r"\.?\s*(\d+(\.\d+)?|[ivxlc]+)\s*([.:\-–—|]|\s|$)",
+    r"\.?\s*((?:[a-z]\.)?\d+(\.\d+)?|[ivxlc]+)\s*([.:\-–—|]|\s|$)",
     re.IGNORECASE,
 )
 # Without a figure/table next to it, only "Figura 3: ..." / "Tabela 2 - ..." count.
@@ -185,15 +185,19 @@ def _mode_size(chars: list[Char]) -> float:
 
 def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
     """Text of one line, with superscript / subscript runs marked by baseline shift."""
-    normal = [c.y1 for c in chars if abs(c.size - main) <= main * 0.12] or [c.y1 for c in chars]
+    # The text size: the biggest one a fair share of the glyphs have. (In "MnO2(s) + CO2(g)"
+    # the indices outnumber the letters.)
+    tally = Counter(round(c.size * 2) / 2 for c in chars)
+    shared = [s for s, n in tally.items() if n >= max(2, len(chars) * 0.2)]
+    main = max([main, *shared])
+    normal = [c.y1 for c in chars if abs(c.size - main) <= main * 0.05] or [c.y1 for c in chars]
     base = statistics.median(normal)
     # Letter-spaced text ("T Í T U L O") has wide gaps between every glyph: a word gap
     # must be wide *relative to the usual gap of this run*, not just in absolute terms.
     gaps = [b.x0 - a.x1 for a, b in zip(chars, chars[1:], strict=False) if b.space < 2]
     tracking = max(0.0, statistics.median(gaps)) if len(gaps) >= 3 else 0.0
     word_gap = tracking + max(main, 1) * WORD_GAP_EM
-    out: list[list[str]] = []
-    prev: Char | None = None
+    kinds = []
     for ch in chars:
         kind = "n"
         if ch.size < main * 0.86:
@@ -201,12 +205,30 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
                 kind = "sup"
             elif ch.y1 - base > main * 0.08:
                 kind = "sub"
+        elif ch.size < main * 0.96:  # barely smaller ("cm³" at 90 %): the shift must be clear
+            if base - ch.y1 > main * 0.25:
+                kind = "sup"
+            elif ch.y1 - base > main * 0.15:
+                kind = "sub"
+        kinds.append(kind)
+    # A glyph of another font inside an index ("(ℓ)" with a script l) follows its neighbours.
+    for k in range(1, len(chars) - 1):
+        off_line = abs(chars[k].y1 - base) > main * 0.08  # ("O" in "H2O2" stays on the line)
+        if kinds[k] == "n" and off_line and kinds[k - 1] == kinds[k + 1] != "n":
+            tight = max(chars[k].x0 - chars[k - 1].x1, chars[k + 1].x0 - chars[k].x1) <= main * 0.2
+            if tight:
+                kinds[k] = kinds[k - 1]
+    out: list[list[str]] = []
+    prev: Char | None = None
+    for ch, kind in zip(chars, kinds, strict=True):
         gap = ch.x0 - prev.x1 if prev else 0
         space = prev is not None and (
             ch.space == 2 or gap > word_gap or (ch.space and gap > word_gap * 0.6)
         )
         if ch.c == "," and ch.space < 2:
             space = False  # a gap left by an inline icon ("Wu [iD], Fellow"), not a word gap
+        if kind != "n" and gap <= main * 0.35:
+            space = False  # an exponent or index hugs its base ("x²", not "x ²")
         if out and out[-1][0] == kind:
             out[-1][1] += (" " if space else "") + ch.c
         else:
@@ -217,12 +239,192 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
     return [(k, t) for k, t in out]
 
 
+FRACTION_SLASH = chr(0x2044)  # numerator ⁄ denominator, until the text is written out
+FRACTION_END = chr(0x2064)  # invisible: where the denominator stops ("1⁄2" + "O2", not "1⁄2O")
+
+
+def plain_math(text: str) -> str:
+    """The typeset marks as readable text: "1⁄2" + end mark + "O" -> "1/2 O"."""
+    if FRACTION_SLASH not in text and FRACTION_END not in text:
+        return text
+    text = re.sub(FRACTION_END + r"(?=[^\W_])", " ", text.replace(FRACTION_SLASH, "/"))
+    return text.replace(FRACTION_END, "")
+
+
+_GROUPING = frozenset("+-−–±·×÷=<>,;")
+
+
+def _math_group(group: list[Char]) -> bool:
+    """Does this numerator / denominator / radicand need brackets when written on one line?"""
+    return len(group) > 1 and any(c.c in _GROUPING or c.space for c in group[1:])
+
+
+def _typeset_math(chars: list[Char], g: Graphics) -> list[Char]:
+    """Fractions and radicals are drawn, not typed: a numerator, a rule, a denominator; a
+    root sign made of strokes over its radicand. Read as plain glyphs they come out as
+    "5 12" and "10 2". The geometry says what they are, so they are put back on the line as
+    "5⁄12" and "10√2" (and later written as a LaTeX frac and sqrt)."""
+    rules = sorted(
+        {(round(y, 1), round(a, 1), round(b, 1)) for y, a, b in g.hrules if 3 <= b - a <= 220}
+    )
+    if not chars or not rules or len(rules) > 500:
+        return chars
+    gone: set[int] = set()
+    drawn: list[tuple[float, float, float, float]] = []  # where a sign's strokes are
+    put: dict[int, list[Char]] = {}  # index in `chars` -> what replaces that glyph
+    after: dict[int, list[Char]] = {}
+
+    def row_goes_on(idx: list[int], x0: float, x1: float, size: float) -> bool:
+        """Glyphs on the same row right beside the rule: the row is a line of text, and the
+        rule an underline or a table border."""
+        members = set(idx)
+        cy = statistics.median(chars[i].cy for i in idx)
+        return any(
+            i not in members
+            and abs(c.cy - cy) < size * 0.25
+            and abs(c.size - size) <= size * 0.06  # (an index beside it is not its row)
+            and (x0 - size * 1.5 <= c.x1 <= x0 + 0.5 or x1 - 0.5 <= c.x0 <= x1 + size * 1.5)
+            for i, c in enumerate(chars)
+        )
+
+    for y, x0, x1 in rules:
+        num: list[int] = []
+        den: list[int] = []
+        for i, c in enumerate(chars):
+            if i in gone or i in put or not x0 - 1 <= c.cx <= x1 + 1:
+                continue
+            if abs(c.y1 - y) <= c.size * 0.3 and c.cy < y:
+                num.append(i)
+            elif abs(c.y0 - y) <= c.size * 0.3 and c.cy > y:
+                den.append(i)
+        if not den or len(num) > 40 or len(den) > 40:
+            continue
+        size = statistics.median(chars[i].size for i in num + den)
+        width = max(
+            max(chars[i].x1 for i in part) - min(chars[i].x0 for i in part)
+            for part in (num, den)
+            if part
+        )
+        if num:  # --- a fraction
+            if x1 - x0 > width + size * 1.5 or row_goes_on(num, x0, x1, size):
+                continue
+            if row_goes_on(den, x0, x1, size):
+                continue
+            first = min(num + den)
+            parts: list[tuple[str, int]] = []
+            for part in (num, den):
+                group = sorted((chars[i] for i in part), key=lambda c: c.x0)
+                wrap = _math_group(group)
+                if part is den:
+                    parts.append((FRACTION_SLASH, chars[first].font))
+                if wrap:
+                    parts.append(("(", group[0].font))
+                parts += [(c.c, c.font) for c in group]
+                if wrap:
+                    parts.append((")", group[0].font))
+            parts.append((FRACTION_END, chars[first].font))
+            step = (x1 - x0) / len(parts)
+            put[first] = [
+                Char(t, x0 + k * step, y - size / 2, x0 + (k + 1) * step - 0.01, y + size / 2, f, 0)
+                for k, (t, f) in enumerate(parts)
+            ]
+            put[first][0].space = 1
+            gone.update(i for i in num + den if i != first)
+            drawn.append((x0 - 0.5, y - 0.5, x1 + 0.5, y + 0.5))
+            continue
+        # --- a root: the rule is the bar over the radicand, with the hook of the sign on
+        # its left and nothing closing it below (that would be a box or a table cell).
+        if x1 - x0 > width + size * 0.8:
+            continue
+        top = min(chars[i].y0 for i in den)
+        bottom = max(chars[i].y1 for i in den)
+        # (The strokes of the hook come as thin rules or as small slanted drawings.)
+        strokes = [
+            (x, yb - ya)
+            for x, ya, yb in g.vrules
+            if x0 - size * 1.2 <= x <= x0 + 2 and ya < bottom and yb > top
+        ] + [
+            (b[0], b[3] - b[1])
+            for b in g.ink
+            if x0 - size * 1.2 <= b[0] and b[2] <= x0 + 2 and b[1] < bottom and b[3] > top
+        ]
+        hook = [x for x, _ in strokes] if any(h >= size * 0.4 for _, h in strokes) else []
+        closed = any(
+            bottom - size * 0.3 <= yy <= bottom + size * 0.5
+            and min(b, x1) - max(a, x0) >= (x1 - x0) * 0.5
+            for yy, a, b in g.hrules
+        )
+        if not hook or min(hook) > x0 - size * 0.12 or closed:
+            continue
+        drawn.append((min(hook) - 1, top - 2, x1 + 1, bottom + 2))
+        group = sorted(den, key=lambda i: chars[i].x0)
+        head = chars[group[0]]
+        wrap = _math_group([chars[i] for i in group]) or (
+            len(group) > 1 and not all(chars[i].c.isdigit() for i in group)
+        )
+        # The sign starts where its hook does: no gap, no space, after "10" in "10√2".
+        sign = [Char("√", min(hook), head.y0, head.x0 - 0.04, head.y1, head.font, 0)]
+        if wrap:
+            sign.append(Char("(", head.x0 - 0.03, head.y0, head.x0 - 0.02, head.y1, head.font, 0))
+        put[group[0]] = [*sign, Char(head.c, head.x0, head.y0, head.x1, head.y1, head.font, 0)]
+        if wrap:
+            tail = chars[group[-1]]
+            after[group[-1]] = [
+                # (on the line, even after an exponent)
+                Char(")", tail.x1 + 0.01, head.y0, tail.x1 + 0.02, head.y1, head.font, 0)
+            ]
+    if not put:
+        return chars
+
+    # The strokes of these signs are not table borders, nor a drawing.
+    def sign(box) -> bool:
+        return any(_inside(box, d) for d in drawn)
+
+    g.hrules = [r for r in g.hrules if not sign((r[1], r[0], r[2], r[0]))]
+    g.vrules = [r for r in g.vrules if not sign((r[0], r[1], r[0], r[2]))]
+    g.ink = [b for b in g.ink if not sign(b)]
+    out: list[Char] = []
+    for i, c in enumerate(chars):
+        if i in gone:
+            continue
+        out += put.get(i, [c])
+        out += after.get(i, [])
+    return out
+
+
+_FRACTION = re.compile(r"(\([^()]*\)|[^\s()⁄⁤]+)⁄(\([^()]*\)|[^\s()⁄⁤]+)⁤?")
+_ROOT = re.compile(r"\\sqrt\s*(\([^()]*\)|\d+|\w)")
+_OPERATOR_GAP = re.compile(r"(?<=[\w)\]²³])([=+−<>≤≥≠]) (?=\S)|(?<=\S) ([=+−<>≤≥≠])(?=[\w(\[√])")
+
+
+def _bare(group: str) -> str:
+    return group[1:-1] if group.startswith("(") and group.endswith(")") else group
+
+
+def math_latex(text: str) -> str:
+    """ "5⁄12" -> "\\frac{5}{12}", "√(x+1)" -> "\\sqrt{x+1}"."""
+    text = _ROOT.sub(lambda m: "\\sqrt{" + _bare(m.group(1)) + "}", text)
+    return _FRACTION.sub(
+        lambda m: "\\frac{" + _bare(m.group(1)) + "}{" + _bare(m.group(2)) + "}", text
+    )
+
+
+_STATE = re.compile(r"\((s|l|ℓ|g|aq|v|c)\)$")
+
+
 def segments_text(segments: list[tuple[str, str]]) -> str:
     parts = []
     for kind, text in segments:
         if kind == "n":
             parts.append(text)
             continue
+        state = _STATE.search(text.strip()) if kind == "sub" else None
+        if state:  # "CO2(g)": the index, then the state of matter written plainly
+            head = text.strip()[: state.start()]
+            lowered = to_subscript(head) if head else ""
+            if lowered is not None:
+                parts.append(lowered + state.group(0))
+                continue
         conv = to_superscript(text) if kind == "sup" else to_subscript(text)
         if conv is not None:
             parts.append(conv)
@@ -230,18 +432,25 @@ def segments_text(segments: list[tuple[str, str]]) -> str:
             mark = "^" if kind == "sup" else "_"
             t = text.strip()
             parts.append(f"{mark}{t}" if len(t) == 1 else f"{mark}({t})")
-    return "".join(parts)
+    text = plain_math("".join(parts))
+    # "x²+ y²= 4": an operator spaced on one side only gets its other space.
+    return _OPERATOR_GAP.sub(lambda m: f" {m.group(1) or m.group(2)} ", text)
 
 
 def segments_latex(segments: list[tuple[str, str]]) -> str:
     parts = []
     for kind, text in segments:
-        body = latex_escape(text.strip() if kind != "n" else text)
+        body = math_latex(latex_escape(text.strip() if kind != "n" else text))
         parts.append(body if kind == "n" else ("^{" if kind == "sup" else "_{") + body + "}")
     return re.sub(r"\s+", " ", "".join(parts)).strip()
 
 
 # ============================================================================= PDFium readers
+# By font name. URW's "Medi" is its bold cut; Computer Modern has cmbx (bold), cmti (italic).
+_BOLD_NAME = re.compile(r"bold|black|heavy|semibold|demi|medi(ital)?$|^cmbx|^cmb\d")
+_ITALIC_NAME = re.compile(r"italic|oblique|ital$|^cmti|^cmsl")
+
+
 def _font_info(obj, cache: dict | None = None) -> FontInfo:
     font = pr.FPDFTextObj_GetFont(obj) if obj else None
     key = ctypes.cast(font, ctypes.c_void_p).value if font else 0
@@ -276,8 +485,8 @@ def _font_info(obj, cache: dict | None = None) -> FontInfo:
                 white = a.value > 0 and min(r.value, g_.value, b.value) >= 250
     return FontInfo(
         name=name,
-        bold=weight >= 600 or any(k in low for k in ("bold", "black", "heavy", "semibold", "demi")),
-        italic=bool(flags & 64) or "italic" in low or "oblique" in low,
+        bold=weight >= 600 or bool(_BOLD_NAME.search(low)),
+        italic=bool(flags & 64) or bool(_ITALIC_NAME.search(low)),
         math=is_math_font(low),
         mono=bool(flags & 1)
         or any(k in low for k in ("mono", "courier", "consol", "menlo", "inconsolata")),
@@ -572,7 +781,9 @@ def _drop_caps(chars: list[Char]) -> list[Char]:
     return out
 
 
-def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
+def build_spans(
+    chars: list[Char], fonts: list[FontInfo], gutters_out: list | None = None
+) -> list[Span]:
     """Group chars into visual lines (stream order + geometry), then split at wide gaps."""
     chars = _drop_caps(chars)
     raw_lines: list[list[Char]] = []
@@ -606,6 +817,8 @@ def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
             )
             start = i
     gaps = page_gutters(runs)
+    if gutters_out is not None:
+        gutters_out.extend(gaps)
     spans: list[Span] = []
     for line in raw_lines:
         line = _compose_accents(line)
@@ -717,38 +930,83 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
     # Where the text of each fragment sits, whatever tall glyph (a big operator, a limit)
     # stretches its box: two lines of a formula-heavy paragraph have overlapping boxes.
     mids = [statistics.median(c.cy for c in ln) for ln in lines]
-    order = sorted(range(len(lines)), key=lambda i: (boxes[i][1], boxes[i][0]))
+    # A merged line is measured by its main fragment (the text), not by the exponent that
+    # happened to be drawn first.
+    counts = [len(ln) for ln in lines]
+    main_len = list(counts)
+
+    def by_place(i: int) -> tuple[float, float]:
+        return boxes[i][1], boxes[i][0]
+
+    # The lines of text first; then each short piece (an exponent, an index, a limit) joins
+    # the line it overlaps most, whichever was drawn first. Between two tight lines, the
+    # index of the upper one and the exponent of the lower one sit at the same height.
+    # (Short pieces set at the text size — "·K", ")" — go before the raised or lowered
+    # ones, so that an exponent finds the letter it belongs to already in place.)
+    everything = range(len(lines))
+    order = sorted((i for i in everything if counts[i] > 6), key=by_place)
+    typical = statistics.median(sizes[i] for i in order) if order else statistics.median(sizes)
+    plain = {i for i in everything if counts[i] <= 6 and sizes[i] >= typical * 0.95}
+    order += sorted(plain, key=by_place)
+    order += sorted((i for i in everything if counts[i] <= 6 and i not in plain), key=by_place)
     merged: list[int] = []
     out: dict[int, list[list[Char]]] = {}
     for i in order:
         bi = boxes[i]
-        target = None
-        for j in merged[-6:]:
+        short = len(lines[i]) <= 6
+        target, best = None, -math.inf
+        for j in merged if short else merged[-6:]:
             bj = boxes[j]
             hi, hj = bi[3] - bi[1], bj[3] - bj[1]
             h = min(hi, hj)
             overlap = min(bi[3], bj[3]) - max(bi[1], bj[1])
+            if overlap <= 0:
+                continue
             touching = bi[0] <= bj[2] + h * SPAN_GAP_EM and bj[0] <= bi[2] + h * SPAN_GAP_EM
             level = abs(mids[i] - mids[j]) <= min(sizes[i], sizes[j]) * 0.35
             if overlap >= h * 0.7 and touching and level:
-                target = j
-                break
+                if not short:
+                    target = j
+                    break
+                if overlap / h + 1 > best:
+                    target, best = j, overlap / h + 1
+                continue
             # A superscript/subscript drawn on its own: smaller glyphs (or a short piece),
             # partly overlapping, glued to the bigger fragment. Two full lines of the same
             # text, one of them taller because of its own scripts, are not that.
-            glued = bi[0] <= bj[2] + h * 0.4 and bj[0] <= bi[2] + h * 0.4
             small = i if hi <= hj else j
-            script = (
-                min(sizes[i], sizes[j]) <= max(sizes[i], sizes[j]) * 0.85 or len(lines[small]) <= 6
-            )
-            if h <= max(hi, hj) * 0.8 and overlap >= h * 0.2 and glued and script:
-                target = j
-                break
+            big = j if small == i else i  # the script is the piece both shorter and set smaller
+            script = sizes[small] <= sizes[big] * 0.85 or counts[small] <= 6
+            lone = counts[small] <= 6 and overlap >= h * 0.35  # an exponent placed on its own
+            if i in plain or not (
+                (h <= max(hi, hj) * 0.8 or lone) and overlap >= h * 0.2 and script
+            ):
+                continue
+            if not short:
+                if bi[0] <= bj[2] + h * 0.4 and bj[0] <= bi[2] + h * 0.4:
+                    target = j
+                    break
+                continue
+            # Glued to a glyph of that line, not just somewhere along it.
+            glyphs = [c for frag in out[j] for c in frag]
+            near = any(max(c.x0 - bi[2], bi[0] - c.x1, 0) <= h * 0.5 for c in glyphs)
+            # An exponent sits in a gap of its own line; over the other line it hangs above
+            # (or below) that line's letters.
+            reach = max(0.8, (bi[2] - bi[0]) * 0.12)
+            clash = any(min(c.x1, bi[2]) - max(c.x0, bi[0]) > reach for c in glyphs)
+            score = overlap / h - (1 if clash else 0)
+            if near and score > best:
+                target, best = j, score
         if target is None:
             merged.append(i)
             out[i] = [lines[i]]
         else:
             out[target].append(lines[i])
+            counts[target] += len(lines[i])
+            bigger = sizes[i] > sizes[target] * 1.05
+            longer = sizes[i] >= sizes[target] * 0.98 and len(lines[i]) > main_len[target]
+            if bigger or longer:
+                sizes[target], mids[target], main_len[target] = sizes[i], mids[i], len(lines[i])
             bj = boxes[target]
             boxes[target] = [
                 min(bj[0], bi[0]),
@@ -756,6 +1014,31 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
                 max(bj[2], bi[2]),
                 max(bj[3], bi[3]),
             ]
+    # A line cut into pieces by its own indices ("H", "2", "O", "2(aq)", "+ I"…): pieces on
+    # one baseline that now touch, with their indices attached, are that line.
+    merged.sort(key=by_place)
+    k = 0
+    while k < len(merged):
+        a = merged[k]
+        for b in merged[k + 1 :]:
+            size = min(sizes[a], sizes[b])
+            ba, bb = boxes[a], boxes[b]
+            if (
+                abs(mids[a] - mids[b]) <= size * 0.2
+                and abs(sizes[a] - sizes[b]) <= size * 0.15
+                and max(bb[0] - ba[2], ba[0] - bb[2]) <= size * 0.9
+            ):
+                out[a] += out.pop(b)
+                boxes[a] = [
+                    min(ba[0], bb[0]),
+                    min(ba[1], bb[1]),
+                    max(ba[2], bb[2]),
+                    max(ba[3], bb[3]),
+                ]
+                merged.remove(b)
+                break
+        else:
+            k += 1
     return [_order_line(out[i]) for i in merged]
 
 
@@ -768,13 +1051,17 @@ def _join_markers(spans: list[Span], gaps=()) -> list[Span]:
     """'•' or '1.' followed by the item text (hanging indent) is one span, not two columns.
     (An equation number at the end of a column is not the marker of the next column's line.)"""
     out: list[Span] = []
+    left = min((s.x0 for s in spans), default=0.0)
     i = 0
     while i < len(spans):
         s = spans[i]
         if i + 1 < len(spans) and _is_marker(s.text):
             nxt = spans[i + 1]
             same_row = min(s.y1, nxt.y1) - max(s.y0, nxt.y0) > min(s.height, nxt.height) * 0.4
-            over_gutter = any(s.x1 <= g0 + 2.5 and nxt.x0 >= g1 - 2.5 for g0, g1 in gaps)
+            # (A gutter has a column of text on its left; the gap after "a)" has only "a)".)
+            over_gutter = any(
+                s.x1 <= g0 + 2.5 and nxt.x0 >= g1 - 2.5 and g0 - left >= 100 for g0, g1 in gaps
+            )
             if same_row and not over_gutter and 0 <= nxt.x0 - s.x1 < max(s.size, 6) * 4:
                 nxt.chars[0].space = 2
                 out.append(Span(s.chars + nxt.chars, s.fonts))
@@ -837,7 +1124,7 @@ def _text_like(side: list[Atom]) -> bool:
     return bool(lengths) and statistics.median(lengths) >= TEXT_LIKE_CHARS
 
 
-def _split_columns(items: list[Atom], min_gap: float) -> list[list[Atom]] | None:
+def _split_columns(items: list[Atom], min_gap: float, page_gaps=()) -> list[list[Atom]] | None:
     if len(items) < 2:
         return None
     cols: list[list[Atom]] = []
@@ -860,7 +1147,15 @@ def _split_columns(items: list[Atom], min_gap: float) -> list[list[Atom]] | None
             run = run + 1 if hit else 0
             longest = max(longest, run)
         cuts_table = longest >= 3 or (bool(across) and all(across))
-        if left and right and not cuts_table and _text_like(left) and _text_like(right):
+        # The page's own gutter splits even when one side is not prose (labels of a chart).
+        # (Never through the rows of a table, however few.)
+        known = (
+            (_text_like(left) or _text_like(right))
+            and not any(across)
+            and any(min(b, g1) - max(a, g0) >= (b - a) * 0.5 for a, b in page_gaps)
+        )
+        prose = _text_like(left) and _text_like(right)
+        if left and right and not cuts_table and (known or prose):
             cols.append(left)
             rest = right
     if not cols:
@@ -879,15 +1174,15 @@ def _table_row(band: list[Atom]) -> bool:
     )
 
 
-def reading_order(items: list[Atom], min_gap: float) -> list[list[Atom]]:
+def reading_order(items: list[Atom], min_gap: float, page_gaps=()) -> list[list[Atom]]:
     """Column-aware recursive XY-cut. Returns bands (atoms on one visual row) in order."""
     if not items:
         return []
     if len(items) == 1:
         return [items]
-    cols = _split_columns(items, min_gap)
+    cols = _split_columns(items, min_gap, page_gaps)
     if cols:
-        return [band for col in cols for band in reading_order(col, min_gap)]
+        return [band for col in cols for band in reading_order(col, min_gap, page_gaps)]
     bands = _bands(items)
     if len(bands) == 1:
         return [sorted(items, key=lambda a: a.x0)]
@@ -899,7 +1194,9 @@ def reading_order(items: list[Atom], min_gap: float) -> list[list[Atom]]:
         ahead = [a for b in bands[k + 1 : k + 3] for a in b]
         if _table_row(band) and not _table_row(groups[-1][-1:]):
             groups.append(band)  # a table starts under the columns: don't let a gutter cut it
-        elif _split_columns(union, min_gap) or (ahead and _split_columns(union + ahead, min_gap)):
+        elif _split_columns(union, min_gap, page_gaps) or (
+            ahead and _split_columns(union + ahead, min_gap, page_gaps)
+        ):
             groups[-1] = union
         else:
             groups.append(band)
@@ -908,7 +1205,7 @@ def reading_order(items: list[Atom], min_gap: float) -> list[list[Atom]]:
         if len(group) == len(items):  # no progress possible: stop here
             out += [sorted(b, key=lambda a: a.x0) for b in _bands(group)]
         else:
-            out += reading_order(group, min_gap)
+            out += reading_order(group, min_gap, page_gaps)
     return out
 
 
@@ -1502,6 +1799,11 @@ class Line:
         return max(self.spans, key=lambda s: len(s.chars)).size
 
     @cached_property
+    def italic(self) -> bool:
+        slanted = [s.fonts[c.font].italic for s in self.spans for c in s.chars]
+        return sum(slanted) >= len(slanted) * 0.9
+
+    @cached_property
     def bold(self) -> bool:
         # By glyph: a line with a few words in bold is not a bold line.
         chars = [c for s in self.spans for c in s.chars]
@@ -1595,6 +1897,16 @@ def _right_edges(lines: list[Line]) -> dict[int, float]:
         if beside:
             edge = min(edge, max(a.x1, min(beside) - size))
         out[id(a)] = edge
+    # A line that ends exactly where the line above or below does is a full line of a
+    # justified block (an abstract set narrower than the body text): it wrapped.
+    for i, a in enumerate(lines):
+        for b in (lines[i - 1] if i else None, lines[i + 1] if i + 1 < len(lines) else None):
+            if b is None or abs(b.x1 - a.x1) > 1.5:
+                continue
+            size = max(a.size, 4)
+            near = min(abs(b.y0 - a.y1), abs(a.y0 - b.y1)) < size * 1.5
+            if near and min(a.x1 - a.x0, b.x1 - b.x0) > size * 8:
+                out[id(a)] = a.x1
     return out
 
 
@@ -1667,6 +1979,7 @@ def _runs(group: list[Line], edges: dict[int, float]) -> list[dict]:
                     prior = piece[-1]
                     for i, (kind, text) in enumerate(_segments(piece, span.size)):
                         script = None if kind == "n" else ("super" if kind == "sup" else "sub")
+                        text = plain_math(text)
                         add((lead if i == 0 else "") + text, f.bold, f.italic, script)
                     piece = []
                 if ch is not None:
@@ -1870,7 +2183,14 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
                 first = group[0]
                 indent_ok = ln.x0 >= first.x0 + size * 0.3
                 wrapped = ln.x0 >= first.x0 - 2 and prev.x1 >= max(g.x1 for g in group) - size * 2
-                continues = continues and (indent_ok or wrapped)
+                # (A first line cut short on purpose is a heading line, not an item.)
+                continues = (
+                    continues
+                    and (indent_ok or wrapped)
+                    and not _hard_break(prev, ln, edges)
+                    # ("A. Related Work" in italics, then its paragraph in upright type.)
+                    and not (group[0].italic and not ln.italic)
+                )
             else:
                 text_so_far = prev.text.rstrip()
                 short_prev = prev.x1 < max(g.x1 for g in group) - size * 2.5
@@ -1912,7 +2232,9 @@ def analyze_page(pdf: pdfium.PdfDocument, index: int, opts: LayoutOptions) -> Pa
         g = read_graphics(page, crop, width, height)
         if any(f.white for f in fonts):
             chars, rotated = _visible(page, chars + rotated, fonts, g, width, height, rotated)
-        spans = build_spans(chars, fonts) if chars else []
+        page_gaps: list = []
+        chars = _typeset_math(chars, g)
+        spans = build_spans(chars, fonts, page_gaps) if chars else []
         rot_spans = [Span(grp, fonts) for grp in _group_rotated(rotated)]
         sizes: Counter = Counter(round(c.size * 2) / 2 for c in chars)
         body = sizes.most_common(1)[0][0] if sizes else 10.0
@@ -1927,7 +2249,9 @@ def analyze_page(pdf: pdfium.PdfDocument, index: int, opts: LayoutOptions) -> Pa
 
         atoms = [Atom("span", s.x0, s.y0, s.x1, s.y1, span=s) for s in spans]
         atoms += [Atom(b.type, *b.bbox, block=b) for b in tables + figures]
-        bands = reading_order(atoms, max(GUTTER_MIN, body * 0.8))
+        # Text is set in two or three columns; more gutters than that are a table's.
+        text_gaps = page_gaps if len(page_gaps) <= 2 else []
+        bands = reading_order(atoms, max(GUTTER_MIN, body * 0.8), text_gaps)
 
         blocks: list[Block] = []
         pending: list[Line] = []
@@ -2079,8 +2403,12 @@ def finalize(results: list[PageResult], heading_hints: dict[str, int] | None = N
     body = total.most_common(1)[0][0] if total else 10.0
 
     _mark_furniture(pages)
+    _normalize_sizes(pages, body)
     _classify_headings(pages, body, heading_hints or {})
+    _merge_heading_lines(pages, body)
     for p in pages:
+        _absorb_formula_bits(p)
+        _compose_figures(p, body)
         _link_captions(p)
         _layout_format(p)
         for n, b in enumerate(p.blocks):
@@ -2133,6 +2461,19 @@ def _mark_furniture(pages: list[Page]) -> None:
                 and len(key) >= 3
             ):
                 b.type = z
+            elif len(pages) >= 2 and b.type != "figure":
+                # A running stamp glued to another line of the margin ("©2026 IEEE" +
+                # "Authorized licensed use…").
+                for (cz, stamp), n in counts.items():
+                    if (
+                        cz == z
+                        and n >= need
+                        and len(stamp) >= 20
+                        and len(stamp) >= len(key) * 0.5
+                        and stamp in key
+                    ):
+                        b.type = z
+                        break
 
 
 def _section_number(b: Block, body: float) -> bool:
@@ -2142,21 +2483,170 @@ def _section_number(b: Block, body: float) -> bool:
     if re.fullmatch(r"[IVX]{1,4}\.", b.marker):  # "I. INTRODUCTION" in small caps
         letters = [c for c in b.text if c.isalpha()]
         return len(letters) >= 4 and all(c.isupper() for c in letters)
+    if re.fullmatch(r"[A-Z]\.", b.marker):  # "A. Image Denoising": a subsection
+        text = b.text.strip()
+        return (
+            len(text) <= 70
+            and text[-1:] not in ".,;:"
+            and text[:1].isupper()
+            and len(text.split()) <= 10
+        )
     if not b.marker[0].isdigit():
         return False
     return (b.font_size or body) >= body * 1.25 or (b.bold and not b.text.rstrip().endswith("."))
 
 
+def _normalize_sizes(pages: list[Page], body: float) -> None:
+    """The height of a glyph box depends on the font's metrics: a 14 pt bold title can come
+    out shorter than 12 pt author names. Blocks are compared by their real size instead,
+    scaled so that body text keeps its box height."""
+    weight: Counter = Counter()
+    for p in pages:
+        for b in p.blocks:
+            if b.pt and b.text and b.type == "paragraph":
+                weight[round(b.pt * 2) / 2] += len(b.text)
+    if not weight:
+        return
+    body_pt = weight.most_common(1)[0][0]
+    for p in pages:
+        for b in p.blocks:
+            if b.pt and b.font_size:
+                b.font_size = b.pt / body_pt * body
+
+
+def _front_matter(pages: list[Page], body: float) -> set[int]:
+    """Blocks between the title and the abstract of the first page: authors and affiliations,
+    often set bigger than the body, but not headings."""
+    if not pages or pages[0].number != 1:
+        return set()
+    blocks = pages[0].blocks
+
+    def size(b: Block) -> float:
+        return b.font_size or body
+
+    title_size = max([body, *(size(b) for b in blocks if b.type == "paragraph" and b.text)])
+    title = next(
+        (
+            i
+            for i, b in enumerate(blocks)
+            if b.type == "paragraph" and b.text and size(b) >= title_size * 0.98
+        ),
+        None,
+    )
+    if title is None or title_size < body * 1.3:
+        return set()
+    head = blocks[title]
+    abstract = next(
+        (
+            b
+            for b in blocks[title + 1 :]
+            if b.bbox
+            and b.text
+            and re.match(r"(abstract|resumo|summary)", b.text.strip(), re.IGNORECASE)
+        ),
+        None,
+    )
+    if abstract is None or not head.bbox:
+        return set()
+    # By position: on a two-column page the second author comes later in reading order.
+    return {
+        id(b)
+        for b in blocks
+        if b is not head
+        and b.bbox
+        and b.bbox[1] >= head.bbox[3] - 2
+        and b.bbox[3] <= abstract.bbox[1] + 2
+        and size(b) < title_size * 0.9
+    }
+
+
+_TABLE_LABEL = re.compile(r"(table|tabela|quadro)\s+[ivxlc\d]+\.?$", re.IGNORECASE)
+_HEADING_START = re.compile(r"([IVX]{1,4}|[A-Z])\.\s|(appendix|ap[eê]ndice|anexo)\b", re.IGNORECASE)
+
+
+def _table_title(prev: Block, titles: set[int]) -> bool:
+    return id(prev) in titles or bool(_TABLE_LABEL.match((prev.text or "").strip()))
+
+
+def _merge_heading_lines(pages: list[Page], body: float) -> None:
+    """A title set on two lines (centred, or cut at a hyphen) is one heading."""
+    for p in pages:
+        out: list[Block] = []
+        for b in p.blocks:
+            a = out[-1] if out else None
+            if (
+                a is not None
+                and a.type == "heading"
+                and b.type == "heading"
+                and a.level == b.level
+                and a.bbox
+                and b.bbox
+                and not _NUMBERED_HEADING.match(b.text)
+                and not re.match(r"([IVX]{1,4}|[A-Z])\.\s", b.text)
+                and not re.match(r"(appendix|ap[eê]ndice|anexo)\b", b.text, re.IGNORECASE)
+                and abs((a.font_size or body) - (b.font_size or body)) <= body * 0.1
+                and a.bold == b.bold
+                and b.bbox[1] - a.bbox[3] < (b.font_size or body) * 0.9
+                and b.bbox[1] >= a.bbox[1]
+                and min(a.bbox[2], b.bbox[2]) - max(a.bbox[0], b.bbox[0]) > 0
+            ):
+                hyphen = len(a.text) > 1 and a.text.endswith("-") and a.text[-2].isalpha()
+                a.text = a.text[:-1] + b.text if hyphen else f"{a.text} {b.text}"
+                a.bbox = (
+                    min(a.bbox[0], b.bbox[0]),
+                    a.bbox[1],
+                    max(a.bbox[2], b.bbox[2]),
+                    max(a.bbox[3], b.bbox[3]),
+                )
+                a.lines += b.lines
+                a.runs = None  # one style for the whole title
+                if a.line_boxes and b.line_boxes:
+                    a.line_boxes = [*a.line_boxes, *b.line_boxes]
+                continue
+            out.append(b)
+        p.blocks = out
+
+
+def _bold_section(b: Block, body: float) -> bool:
+    """ "3. Method" / "3.1. Setup" in bold and bigger than the body: sections, even one right
+    after the other."""
+    return bool(
+        b.bold
+        and re.fullmatch(r"\d+(\.\d+)*\.?", b.marker or "")
+        and b.lines <= 2
+        and len(b.text) <= 120
+        and not b.text.rstrip().endswith(".")
+        and (b.font_size or body) >= body * 1.05
+    )
+
+
 def _classify_headings(pages: list[Page], body: float, hints: dict[str, int]) -> None:
     candidates: list[tuple[Block, str]] = []
+    titles: set[int] = set()
+    front = _front_matter(pages, body)
     for p in pages:
         blocks = p.blocks
         for i, b in enumerate(blocks):
             neighbours = [x.type for x in blocks[max(0, i - 1) : i] + blocks[i + 1 : i + 2]]
-            if b.type == "list_item" and "list_item" not in neighbours and _section_number(b, body):
+            lone = "list_item" not in neighbours and _section_number(b, body)
+            # "II. METHOD", "A. Image Denoising": a title by its form, unless "B." follows
+            # right away (then it is a list).
+            titled = False
+            if b.type == "list_item" and re.fullmatch(r"[IVX]{1,4}\.|[A-Z]\.", b.marker or ""):
+                near = blocks[max(0, i - 1) : i] + blocks[i + 1 : i + 2]
+                listed = len(b.marker) == 2 and any(
+                    x.type == "list_item" and re.fullmatch(r"[A-Z]\.", x.marker or "") for x in near
+                )
+                titled = not listed and _section_number(b, body)
+            if b.type == "list_item" and (lone or titled or _bold_section(b, body)):
+                if b.runs:  # the number is part of the title
+                    b.runs[0]["text"] = f"{b.marker} {b.runs[0]['text']}"
                 b.text = f"{b.marker} {b.text}"  # "1. Introduction" is a numbered section
                 b.type, b.marker = "paragraph", None
             if b.type != "paragraph" or not b.text:
+                continue
+            if titled:
+                candidates.append((b, "bold"))
                 continue
             text = b.text.strip()
             key = _signature(text)
@@ -2165,11 +2655,14 @@ def _classify_headings(pages: list[Page], body: float, hints: dict[str, int]) ->
                 continue
             if b.lines > 3 or len(text) > 200 or text[-1:] in ",;" or _CAPTION.match(text):
                 continue
+            if not _WORD.search(text) or id(b) in front:
+                continue  # axis ticks, a lone number; authors under the title
             size = b.font_size or body
             nxt = next((x for x in blocks[i + 1 :] if x.type not in FURNITURE), None)
             letters = [c for c in text if c.isalpha()]
             caps = len(letters) >= 4 and all(c.isupper() for c in letters) and len(text) <= 90
-            key_value = bool(_KEY_VALUE.match(text))  # "Centro de Custo: 88.530" is a field
+            # "Centro de Custo: 88.530" is a field; "FCR: Robust…" in title size is a title.
+            key_value = bool(_KEY_VALUE.match(text)) and size < body * 1.4
             if size >= body * 1.18 and not key_value:
                 candidates.append((b, "size"))
             elif key_value:
@@ -2177,6 +2670,9 @@ def _classify_headings(pages: list[Page], body: float, hints: dict[str, int]) ->
             elif (b.bold and len(text) <= 140 and b.lines <= 2 and text[-1:] != "."
                   and (nxt is None or not nxt.bold or nxt.type != "paragraph")):  # fmt: skip
                 candidates.append((b, "bold"))
+            elif caps and i and _table_title(blocks[i - 1], titles):
+                b.type = "caption"  # "TABLE I", then its title in capitals on the next lines
+                titles.add(id(b))
             elif caps and b.lines == 1 and text[-1:] != ".":
                 candidates.append((b, "caps"))
     size_levels = sorted(
@@ -2197,16 +2693,195 @@ def _classify_headings(pages: list[Page], body: float, hints: dict[str, int]) ->
             b.level = min(6, max(b.level, m.group(1).count(".") + 1 + (1 if top else 0)))
 
 
+def _absorb_formula_bits(page: Page) -> None:
+    """A displayed formula is drawn in pieces: the big "∑", its limits, the body. Pieces of
+    one or two glyphs that ended up as blocks of their own go back into the formula beside
+    them."""
+
+    def bit(b: Block) -> bool:
+        t = b.text.strip()
+        return (
+            b.type == "paragraph"
+            and bool(b.bbox)
+            and len(t) <= 2
+            and not (len(t) == 2 and t.isalpha())
+        )
+
+    keep: list[Block] = []
+    for b in page.blocks:
+        if not bit(b):
+            keep.append(b)
+            continue
+        size = max(b.bbox[3] - b.bbox[1], 6)
+        best, best_gap = None, math.inf
+        for f in page.blocks:
+            if f.type != "formula" or not f.bbox:
+                continue
+            dx = max(f.bbox[0] - b.bbox[2], b.bbox[0] - f.bbox[2], 0)
+            dy = max(f.bbox[1] - b.bbox[3], b.bbox[1] - f.bbox[3], 0)
+            if dx <= size * 1.5 and dy <= size * 1.2 and dx + dy < best_gap:
+                best, best_gap = f, dx + dy
+        if best is None:
+            keep.append(b)
+            continue
+        t = b.text.strip()
+        before = b.bbox[2] <= best.bbox[0] + 2
+        best.text = f"{t} {best.text}" if before else f"{best.text} {t}"
+        if best.latex:
+            tex = latex_escape(t)
+            best.latex = f"{tex} {best.latex}" if before else f"{best.latex} {tex}"
+        best.bbox = (
+            min(best.bbox[0], b.bbox[0]),
+            min(best.bbox[1], b.bbox[1]),
+            max(best.bbox[2], b.bbox[2]),
+            max(best.bbox[3], b.bbox[3]),
+        )
+    page.blocks = keep
+
+
+_WORD = re.compile(r"[^\W\d_]{3}")  # three letters in a row
+_FIGURE_CAPTION = re.compile(r"^(fig|gr[aá]fico|chart|imagem|image|esquema|diagram)", re.IGNORECASE)
+
+
+def _compose_figures(page: Page, body: float) -> None:
+    """A figure made of several pictures with labels around them (sub-titles, "(a)", axis
+    ticks): what is stacked right above a "Figure N" caption, down to the caption, is one
+    figure."""
+
+    def live(b: Block) -> bool:
+        return bool(b.bbox) and b.type not in FURNITURE
+
+    def is_caption(b: Block) -> bool:
+        return b.type in ("paragraph", "heading", "caption") and _caption_text(b.text.strip())
+
+    def label(b: Block, first: bool = False) -> bool:
+        if b.type == "figure":
+            return True
+        if is_caption(b):
+            return False
+        t = b.text or ""
+        if b.type == "table":
+            return len(t) <= 400 or first  # right above the caption: a chart
+        numbered = _NUMBERED_HEADING.match(t) or re.match(r"[IVX]+\.\s", t)
+        if b.type == "heading" and _WORD.search(t) and numbered:
+            return False
+        small = (b.font_size or body) < body * 0.88
+        return (b.lines <= 2 and len(t) <= 60) or (small and len(t) <= 250)
+
+    # Text printed inside a picture (ticks, legend) is part of it.
+    for fig in [b for b in page.blocks if b.type == "figure" and b.bbox]:
+        within = [
+            b
+            for b in page.blocks
+            if b is not fig
+            and live(b)
+            and b.type != "figure"
+            and label(b)
+            and _inside(b.bbox, fig.bbox, 2)
+        ]
+        if not within:
+            continue
+        texts = [fig.text, *((b.text or "").strip() for b in within)]
+        fig.text = NEWLINE.join(t for t in texts if t)
+        gone = {id(b) for b in within}
+        page.blocks = [b for b in page.blocks if id(b) not in gone]
+
+    cols = columns([b.bbox for b in page.blocks if live(b) and b.type != "figure"])
+    captions = [
+        b
+        for b in page.blocks
+        if live(b) and is_caption(b) and _FIGURE_CAPTION.match(b.text.strip())
+    ]
+    for cap in captions:
+        left, right = area_of(cap.bbox, cols) if cols else (-math.inf, math.inf)
+        above = sorted(
+            (
+                b
+                for b in page.blocks
+                if b is not cap
+                and live(b)
+                and b.bbox[3] <= cap.bbox[1] + 3
+                and b.bbox[0] >= left - 3
+                and b.bbox[2] <= right + 3
+            ),
+            key=lambda b: -b.bbox[3],
+        )
+        parts: list[Block] = []
+        top = cap.bbox[1]
+        for b in above:
+            if b.bbox[3] < top - 28:
+                break  # white space: the figure ended
+            if label(b, not parts):
+                parts.append(b)
+                top = min(top, b.bbox[1])
+            elif b.bbox[3] <= top + 2:
+                break  # body text above
+        # Under a "Figure" caption, a grid of rules with text is a chart, not a table.
+        pictures = [b for b in parts if b.type == "figure"] or [
+            b for b in parts if b.type == "table"
+        ]
+        if not pictures and len(parts) >= 6:
+            pictures = parts  # a chart drawn with no frame: only its labels
+        if not pictures:
+            continue
+        # Above the topmost picture only its title belongs: centred on a picture, or small print.
+        picture_top = min(b.bbox[1] for b in pictures)
+
+        def belongs(b: Block, picture_top=picture_top, pictures=pictures) -> bool:
+            if any(b is p for p in pictures) or b.bbox[3] > picture_top + 2:
+                return True
+            if b.bbox[3] < picture_top - 14:
+                return False
+            mid = (b.bbox[0] + b.bbox[2]) / 2
+            centred = any(
+                abs((p.bbox[0] + p.bbox[2]) / 2 - mid) <= (p.bbox[2] - p.bbox[0]) * 0.2
+                for p in pictures
+            )
+            return centred or (b.font_size or body) < body * 0.88
+
+        parts = [b for b in parts if belongs(b)]
+        if len(parts) < 2 and parts[0].type == "figure":
+            continue
+        parts.sort(key=lambda b: (b.bbox[1], b.bbox[0]))
+        bbox = (
+            min(b.bbox[0] for b in parts),
+            min(b.bbox[1] for b in parts),
+            max(b.bbox[2] for b in parts),
+            max(b.bbox[3] for b in parts),
+        )
+        text = NEWLINE.join(t for t in ((b.text or "").strip() for b in parts) if t)
+        ids = {id(b) for b in parts}
+        at = min(i for i, b in enumerate(page.blocks) if id(b) in ids)
+        figure = Block("figure", bbox, text=text)
+        page.blocks = (
+            [b for b in page.blocks[:at] if id(b) not in ids]
+            + [figure]
+            + [b for b in page.blocks[at:] if id(b) not in ids]
+        )
+
+
+def _caption_text(t: str) -> bool:
+    """ "Table 1 presents the results…" is a sentence; "Table 1: Results" and "Table 1 Results"
+    are captions."""
+    m = _CAPTION.match(t)
+    if not m:
+        return False
+    if m.group(0).rstrip()[-1:] in ".:-–—|":
+        return True
+    rest = t[m.end() :].lstrip()
+    return not rest or not rest[0].islower()
+
+
 def _link_captions(page: Page) -> None:
     targets = [b for b in page.blocks if b.type in ("figure", "table") and b.bbox]
     for b in page.blocks:
         if (
             b.type not in ("paragraph", "heading")
             or not b.bbox
-            or not _CAPTION.match(b.text.strip())
+            or not _caption_text(b.text.strip())
         ):
             continue
-        if len(b.text) > 400:
+        if len(b.text) > 900:
             continue
         best, dist = None, math.inf
         for t in targets:
