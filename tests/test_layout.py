@@ -271,7 +271,16 @@ def test_options_with_exponents_stay_one_per_line(exam):
     items = {b.marker: b.text for b in exam if b.type == "list_item"}
     assert items["d)"] == "1,035·10⁹ e 5,5·10⁷"  # and the word gap after the exponent is kept
     assert items["e)"] == "5,000·10³ e 1,0·10⁶"
-    assert not any(b.type == "formula" for b in exam)
+    assert not any(b.type == "formula" and b.text[:2] in ("d)", "e)") for b in exam)
+
+
+def test_equations_on_consecutive_lines_stay_apart(exam):
+    formulas = [b.text for b in exam if b.type == "formula"]
+    assert formulas == ["MnO₂ + C → MnO + CO₂", "2 MnO + C → 2 Mn + CO₂"]
+
+
+def test_root_inside_a_framed_note(exam):
+    assert _text_of(exam, "Considere:") == "Considere: √2 = 1,4 é o valor usado"
 
 
 # ----------------------------------------------------------------- columns, TeX fonts
