@@ -116,6 +116,7 @@
         <p class="hint" id="pages-hint" data-i18n-html="options.pages.hint">Ex.: <code>1-3,5,10-</code></p>
         <label class="check"><input type="checkbox" id="opt-tables" checked><span data-i18n-html="options.tables">Tabelas estruturadas<small>com e sem bordas</small></span></label>
         <label class="check"><input type="checkbox" id="opt-formulas" checked><span data-i18n-html="options.formulas">Fórmulas em LaTeX<small>sobrescrito, subscrito e símbolos</small></span></label>
+        <label class="check"><input type="checkbox" id="opt-math"><span data-i18n-html="options.math">Matemática do texto em LaTeX<small>no Markdown e no TXT: <code>$x^{2} + 1 = 0$</code></small></span></label>
         <label class="check"><input type="checkbox" id="opt-images" checked><span data-i18n-html="options.images">Recortar imagens<small>figuras, tabelas e fórmulas em PNG</small></span></label>
       </fieldset>
 
@@ -183,11 +184,6 @@
       <div class="view" id="view-diff" role="tabpanel" hidden>
         <div class="fidelity" id="fidelity" aria-live="polite"></div>
         <div class="diff-bar">
-          <div class="segmented" style="width:230px" role="radiogroup" aria-label="Modo de comparação" data-i18n-attr="aria-label:diff.mode">
-            <label><input type="radio" name="diffmode" value="side" checked><span data-i18n="diff.side">Lado a lado</span></label>
-            <label><input type="radio" name="diffmode" value="overlay"><span data-i18n="diff.overlay">Sobrepor</span></label>
-          </div>
-          <label class="diff-opacity" id="diff-opacity-field" hidden><span data-i18n="diff.opacity">Opacidade da saída</span><input type="range" id="diff-opacity" min="0" max="100" value="60"></label>
           <label class="check"><input type="checkbox" id="diff-only"><span data-i18n="diff.only">Só páginas com problemas</span></label>
           <span class="diff-legend"><i class="miss"></i><span data-i18n="diff.legend.missing">texto do PDF que não está na saída</span><i class="flag"></i><span data-i18n="diff.legend.flag">bloco que falhou numa verificação</span></span>
         </div>
