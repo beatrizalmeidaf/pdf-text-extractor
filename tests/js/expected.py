@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fixtures import declaration_pdf, exam_pdf, hard_cases_pdf, structured_pdf  # noqa: E402
 from papero_extract import extract  # noqa: E402
+from papero_extract.fidelity import assess, reference_text  # noqa: E402
 
 out = Path(sys.argv[1] if len(sys.argv) > 1 else "out")
 out.mkdir(exist_ok=True)
@@ -21,4 +22,6 @@ for name, build in (
     (out / f"{name}.json").write_text(
         json.dumps(doc.to_dict(embed_images=False), ensure_ascii=False), encoding="utf-8"
     )
+    fidelity = assess(doc, reference_text(pdf)).to_dict()
+    (out / f"{name}.fidelity.json").write_text(json.dumps(fidelity), encoding="utf-8")
 print(f"fixtures + expected JSON in {out}")
