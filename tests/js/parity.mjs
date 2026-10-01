@@ -8,7 +8,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dir = process.argv[2] || join(here, "out");
 const src = readFileSync(join(here, "../../web/assets/engine.js"), "utf8")
   .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/pdfjs-dist@[\d.]+\/build\/pdf\.min\.mjs/, "pdfjs-dist/legacy/build/pdf.mjs")
-  .replace(/pdfjsLib\.GlobalWorkerOptions\.workerSrc =\s*"[^"]+";/, "");
+  .replace(/pdfjsLib\.GlobalWorkerOptions\.workerSrc =\s*"[^"]+";/, "")
+  .replace(/"\.\/(\w+\.js)"/g, (_, f) => JSON.stringify(pathToFileURL(join(here, "../../web/assets", f)).href));
 const enginePath = join(here, ".engine.node.mjs");
 writeFileSync(enginePath, src);
 const { extractDocument } = await import(pathToFileURL(enginePath).href);
