@@ -335,19 +335,17 @@ export async function toDocx(doc) {
         const width = Math.max(...b.rows.map((r) => r.length));
         const total = b.bbox ? Math.round((b.bbox[2] - b.bbox[0]) * TWIP) : 9000;
         const col = Math.round(total / width);
-        const pt = b.style?.pt;
-        const cellRun = (t, bold) => ({ text: t, style: { pt, font: b.style?.font, bold }, runs: [{ text: t, bold, italic: false, script: null }] });
-        // Rows as tall as on the page (Word's own row height is looser).
+        // Rows as tall as on the page (Word's own row height is looser), each line of a
+        // cell on the pitch the page had, in a size that fits it.
         const lineCount = (r) => Math.max(1, ...r.map((c) => String(c).split(String.fromCharCode(10)).length));
         const allLines = b.rows.reduce((n, r) => n + lineCount(r), 0);
-        const rowHeight = (r) => {
-          if (!b.bbox) return "";
-          const h = ((b.bbox[3] - b.bbox[1]) * lineCount(r)) / allLines;
-          const rule = h >= (pt || 10) * lineCount(r) * 1.02 ? "exact" : "atLeast";
-          return `<w:trPr><w:trHeight w:val="${Math.round(h * TWIP)}" w:hRule="${rule}"/></w:trPr>`;
-        };
+        const pitch = b.bbox ? (b.bbox[3] - b.bbox[1]) / allLines : 0;
+        const pt = Math.min(b.style?.pt || 11, pitch ? Math.max(5, Math.round(pitch * 0.86 * 2) / 2) : 11);
+        const cellRun = (t, bold) => ({ text: t, style: { pt, font: b.style?.font, bold }, runs: [{ text: t, bold, italic: false, script: null }] });
+        const cellSpacing = pitch ? ` w:line="${Math.round(pitch * TWIP)}" w:lineRule="exact"` : "";
+        const rowHeight = (r) => (pitch ? `<w:trPr><w:trHeight w:val="${Math.round(pitch * lineCount(r) * TWIP)}" w:hRule="exact"/></w:trPr>` : "");
         const rows = b.rows.map((r, ri) => `<w:tr>${rowHeight(r)}${[...r, ...Array(width - r.length).fill("")].map((c) =>
-          `<w:tc><w:tcPr><w:tcW w:w="${col}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>${docxRuns(cellRun(String(c), ri === 0))}</w:p></w:tc>`).join("")}</w:tr>`).join("");
+          `<w:tc><w:tcPr><w:tcW w:w="${col}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"${cellSpacing}/></w:pPr>${docxRuns(cellRun(String(c), ri === 0))}</w:p></w:tc>`).join("")}</w:tr>`).join("");
         const borders = ["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`).join("");
         let out = `${spacer(before)}<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${Array(width).fill(`<w:gridCol w:w="${col}"/>`).join("")}</w:tblGrid>${rows}</w:tbl>`;
         if (b.caption && !captions.has(b.caption)) out += `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>${docxRuns({ text: b.caption, runs: [{ text: b.caption, italic: true }] })}</w:p>`;

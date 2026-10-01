@@ -53,7 +53,7 @@ Getting the *text* out of a PDF is easy. Getting its **structure** back — whic
     </td>
     <td width="33%" valign="top">
       <b>∑ Formulas</b><br>
-      Superscripts, subscripts and math symbols become LaTeX (<code>E = mc^{2}</code>), plus a cropped image of the formula.
+      Exponents, indices, stacked fractions and drawn root signs are read as mathematics — <code>5/12</code>, <code>10√2</code>, <code>CO₂(g)</code> — and written as LaTeX (<code>\frac{5}{12}</code>, <code>\sqrt{2}</code>), plus a cropped image of the formula.
     </td>
   </tr>
   <tr>
@@ -67,7 +67,7 @@ Getting the *text* out of a PDF is easy. Getting its **structure** back — whic
     </td>
     <td valign="top">
       <b>📝 Back to Word</b><br>
-      Alignment, indents, line spacing, bold runs and fonts are kept, so a <code>.docx</code> export looks like the original page.
+      Columns, alignment, indents, line spacing, bold runs and fonts are kept, so a <code>.docx</code> or HTML export looks like the original page — two columns stay two columns.
     </td>
   </tr>
 </table>
@@ -231,7 +231,7 @@ Dense arXiv papers (multi-column, formulas, tables, figures) on one laptop CPU, 
 | DOCX / PPTX / XLSX / EPUB | ✓ | partial | — | — | ✓ | partial |
 | Runs entirely in the browser | ✓ | — | — | — | — | — |
 
-ML-based tools still win on very irregular layouts and complex math (stacked fractions, matrices) — papero gives you the formula as approximate LaTeX **and** as an image so nothing is lost.
+ML-based tools still win on very irregular layouts and complex math (matrices, aligned systems) — papero gives you the formula as approximate LaTeX **and** as an image so nothing is lost.
 
 ## How it works
 
@@ -245,7 +245,8 @@ The browser app runs the same algorithm ported to JavaScript on pdf.js, and CI c
 <details>
 <summary><b>Limitations</b></summary>
 
-- **Math:** LaTeX is rebuilt from glyphs — stacked fractions, matrices and big radicals come out linear (the cropped image is always there).
+- **Math:** rebuilt from glyphs and strokes. Fractions, roots, exponents and indices are recognised; matrices, aligned systems and nested constructs come out linear (the cropped image is always there). In PDFs whose producer renumbered the glyphs of a math font, the Python engine can miss a symbol the browser engine reads by its glyph name.
+- **Word export** keeps each page on its own page; where Word breaks lines differently, a dense page can run a few lines over onto an extra one.
 - **Borderless tables** with very narrow gaps between columns can read as text.
 - **Scanned PDFs** need OCR, which runs on the server path (Tesseract is in the Docker image).
 - **Word/Excel export** is in the browser app for now.

@@ -61,7 +61,7 @@ def gutters(boxes: Sequence[Box]) -> list[tuple[float, float]]:
                 a > 0
                 and b < n
                 and (b - a) * STEP >= MIN_GUTTER
-                and min(max(cover[:a]), max(cover[b:])) >= max(peak, whole * 0.6) * 0.15
+                and min(max(cover[:a]), max(cover[b:])) >= max(peak, whole * 0.6) * 0.25
                 and floor <= min(max(cover[:a]), max(cover[b:])) * 0.4
             ):
                 out.append((left + a * STEP, left + b * STEP))

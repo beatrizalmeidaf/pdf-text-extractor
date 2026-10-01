@@ -41,7 +41,7 @@ export function gutters(boxes) {
       while (b < j && cover[b] <= floor + peak * 0.02) b++;
       if (a > 0 && b < n && (b - a) * STEP >= MIN_GUTTER) {
         const sides = Math.min(Math.max(...cover.slice(0, a)), Math.max(...cover.slice(b)));
-        if (sides >= Math.max(peak, whole * 0.6) * 0.15 && floor <= sides * 0.4) out.push([left + a * STEP, left + b * STEP]);
+        if (sides >= Math.max(peak, whole * 0.6) * 0.25 && floor <= sides * 0.4) out.push([left + a * STEP, left + b * STEP]);
       }
       a = b;
     }
