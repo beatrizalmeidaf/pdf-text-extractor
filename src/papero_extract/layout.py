@@ -72,6 +72,12 @@ _CAPTION = re.compile(
 _STRICT_CAPTION = re.compile(
     _CAPTION.pattern.replace(r"([.:\-–—|]|\s|$)", r"[.:\-–—|]"), re.IGNORECASE
 )
+_MATH_WORDS = frozenset({
+    "sen", "sin", "cos", "tg", "tan", "cotg", "cot", "sec", "cossec", "csc", "log", "ln", "exp",
+    "lim", "max", "min", "arg", "sup", "inf", "det", "mod", "mdc", "mmc", "dx", "dy", "dt",
+    "sgn", "if", "else", "otherwise", "for", "where", "and", "or", "with", "all",
+})  # fmt: skip
+_LABEL = re.compile(r"[^\W\d_]{3,}:\s")  # a word and a colon open the line
 _KEY_VALUE = re.compile(r"^[^:]{2,40}:\s+\S")
 _EQ_NUMBER = re.compile(r"^\(\s*\d{1,3}(\.\d{1,3})?[a-z]?\s*\)$")
 _PAGE_NUMBER = re.compile(
@@ -418,20 +424,21 @@ def segments_text(segments: list[tuple[str, str]]) -> str:
         if kind == "n":
             parts.append(text)
             continue
+        tail = " " if text[-1:].isspace() else ""  # the word gap after it: "10⁹ e", not "10⁹e"
         state = _STATE.search(text.strip()) if kind == "sub" else None
         if state:  # "CO2(g)": the index, then the state of matter written plainly
             head = text.strip()[: state.start()]
             lowered = to_subscript(head) if head else ""
             if lowered is not None:
-                parts.append(lowered + state.group(0))
+                parts.append(lowered + state.group(0) + tail)
                 continue
         conv = to_superscript(text) if kind == "sup" else to_subscript(text)
         if conv is not None:
-            parts.append(conv)
+            parts.append(conv + tail)
         else:
             mark = "^" if kind == "sup" else "_"
             t = text.strip()
-            parts.append(f"{mark}{t}" if len(t) == 1 else f"{mark}({t})")
+            parts.append((f"{mark}{t}" if len(t) == 1 else f"{mark}({t})") + tail)
     text = plain_math("".join(parts))
     # "x²+ y²= 4": an operator spaced on one side only gets its other space.
     return _OPERATOR_GAP.sub(lambda m: f" {m.group(1) or m.group(2)} ", text)
@@ -441,7 +448,8 @@ def segments_latex(segments: list[tuple[str, str]]) -> str:
     parts = []
     for kind, text in segments:
         body = math_latex(latex_escape(text.strip() if kind != "n" else text))
-        parts.append(body if kind == "n" else ("^{" if kind == "sup" else "_{") + body + "}")
+        tail = " " if text[-1:].isspace() else ""
+        parts.append(body if kind == "n" else ("^{" if kind == "sup" else "_{") + body + "}" + tail)
     return re.sub(r"\s+", " ", "".join(parts)).strip()
 
 
@@ -1841,9 +1849,19 @@ def _formula_like(line: Line) -> bool:
     compact = text.replace(" ", "")
     if not compact or len(compact) > 160 or not any(c.isalnum() for c in compact):
         return False  # "_____" signature lines, dot leaders…
-    words = [w for w in re.split(r"\s+", text) if len(w) > 3 and w.isalpha()]
+    if _LABEL.match(text.lstrip()):
+        return False  # "Dados: massas molares (g·mol⁻¹) H = 1, C = 12": a sentence with values
+    tokens = re.split(r"\s+", text)
+    words = [w for w in tokens if len(w) > 3 and w.isalpha()]
     if len(words) >= 5:
         return False  # prose with a symbol or two
+    # "Se f(x) = ax² + bx + c é tal que f(2) = 8, então": a sentence around its math. Three
+    # plain lower-case words say so; names of functions and operators are not words.
+    # (Not a numbered equation: "δ = ∑ ηᵢ · sgn(∇L)ᵢ for the L∞ norm (14)".)
+    plain = [w for w in tokens if len(w) > 1 and w.isalpha() and w.islower()]
+    numbered = _EQ_NUMBER.match(line.spans[-1].text.strip())
+    if not numbered and sum(w not in _MATH_WORDS for w in plain) >= 3:
+        return False
     score = math_score(text)
     return (
         line.math >= 0.4
@@ -2160,10 +2178,12 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
         this_kind = "paragraph"
         if ln.mono and len(text) > 1:
             this_kind = "code"
+        elif _is_list_start(text):
+            # Before the formula test: the options of a question ("a) 1,0·10⁶") are items, one
+            # per line, however much math they hold — as formulas they would run together.
+            this_kind = "list_item"
         elif _formula_like(ln):
             this_kind = "formula"
-        elif _is_list_start(text):
-            this_kind = "list_item"
         if group:
             prev = group[-1]
             size = max(prev.size, 4)
