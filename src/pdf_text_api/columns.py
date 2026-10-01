@@ -67,6 +67,15 @@ def gutters(boxes: Sequence[Box]) -> list[tuple[float, float]]:
                 out.append((left + a * STEP, left + b * STEP))
             a = b
         k = j
+    # A column of text is wide. A strip of equation numbers down the margin, or the labels
+    # beside a picture, is not a column: the gutter that would make one goes.
+    narrow = max(60.0, (right - left) * 0.12)
+    while out:
+        edges = [left, *((g0 + g1) / 2 for g0, g1 in out), right]
+        thin = next((i for i in range(len(edges) - 1) if edges[i + 1] - edges[i] < narrow), None)
+        if thin is None:
+            break
+        out.pop(min(thin, len(out) - 1))
     return out
 
 

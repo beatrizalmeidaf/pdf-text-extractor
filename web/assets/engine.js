@@ -1999,6 +1999,18 @@ function classifyHeadings(pages, body) {
 // A displayed formula is drawn in pieces: the big "∑", its limits, the body. Pieces of one
 // or two glyphs that ended up as blocks of their own go back into the formula beside them.
 function absorbFormulaBits(page) {
+  // "(21)" out in the margin, level with a formula: that formula's number.
+  page.blocks = page.blocks.filter((b) => {
+    const label = `${b.marker || ""}${b.text}`.trim();
+    if (!["paragraph", "list_item"].includes(b.type) || !b.bbox || !EQ_NUMBER.test(label)) return true;
+    const height = b.bbox[3] - b.bbox[1];
+    const level = page.blocks.filter((f) => f.type === "formula" && f.bbox && f.bbox[2] <= b.bbox[0] + 2 &&
+      Math.min(f.bbox[3], b.bbox[3]) - Math.max(f.bbox[1], b.bbox[1]) >= height * 0.5);
+    if (!level.length) return true;
+    const formula = level.reduce((a, f) => (f.bbox[2] > a.bbox[2] ? f : a));
+    formula.number = formula.number ? `${formula.number} ${label}` : label;
+    return false;
+  });
   const bit = (b) => b.type === "paragraph" && b.bbox && b.text.trim().length <= 2 && !/^[\p{L}]{2}$/u.test(b.text.trim());
   const keep = [];
   for (const b of page.blocks) {

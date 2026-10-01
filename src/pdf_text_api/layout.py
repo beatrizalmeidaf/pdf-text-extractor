@@ -2707,6 +2707,29 @@ def _absorb_formula_bits(page: Page) -> None:
             and not (len(t) == 2 and t.isalpha())
         )
 
+    # "(21)" out in the margin, level with a formula: that formula's number.
+    numbered: list[Block] = []
+    for b in page.blocks:
+        label = f"{b.marker or ''}{b.text}".strip()
+        if b.type not in ("paragraph", "list_item") or not b.bbox or not _EQ_NUMBER.match(label):
+            numbered.append(b)
+            continue
+        height = b.bbox[3] - b.bbox[1]
+        level = [
+            f
+            for f in page.blocks
+            if f.type == "formula"
+            and f.bbox
+            and f.bbox[2] <= b.bbox[0] + 2
+            and min(f.bbox[3], b.bbox[3]) - max(f.bbox[1], b.bbox[1]) >= height * 0.5
+        ]
+        if not level:
+            numbered.append(b)
+            continue
+        formula = max(level, key=lambda f: f.bbox[2])
+        formula.number = f"{formula.number} {label}" if formula.number else label
+    page.blocks = numbered
+
     keep: list[Block] = []
     for b in page.blocks:
         if not bit(b):

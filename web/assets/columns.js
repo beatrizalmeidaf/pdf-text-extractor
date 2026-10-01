@@ -47,6 +47,15 @@ export function gutters(boxes) {
     }
     k = j;
   }
+  // A column of text is wide. A strip of equation numbers down the margin, or the labels
+  // beside a picture, is not a column: the gutter that would make one goes.
+  const narrow = Math.max(60, (right - left) * 0.12);
+  while (out.length) {
+    const edges = [left, ...out.map(([g0, g1]) => (g0 + g1) / 2), right];
+    const thin = edges.findIndex((e, i) => i + 1 < edges.length && edges[i + 1] - e < narrow);
+    if (thin < 0) break;
+    out.splice(Math.min(thin, out.length - 1), 1);
+  }
   return out;
 }
 
