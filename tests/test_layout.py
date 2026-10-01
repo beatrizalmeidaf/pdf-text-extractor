@@ -202,7 +202,8 @@ def letter(tmp_path_factory):
 
 def test_white_alignment_text_is_dropped(letter):
     texts = [b.text for b in letter.pages[0].blocks]
-    assert "( ) Matrícula trancada" in texts and "( ) Participante de mobilidade" in texts
+    lines = [ln for t in texts for ln in t.splitlines()]  # one block or two: font metrics
+    assert "( ) Matrícula trancada" in lines and "( ) Participante de mobilidade" in lines
     assert sum("Situação do vínculo" in t for t in texts) == 1
 
 

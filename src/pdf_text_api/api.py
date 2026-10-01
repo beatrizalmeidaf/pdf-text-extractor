@@ -19,6 +19,7 @@ import logging
 import math
 import multiprocessing
 import os
+import sys
 import tempfile
 import time
 import zipfile
@@ -97,7 +98,8 @@ class WorkerPool:
         self._pool = ProcessPoolExecutor(
             max_workers=self.workers,
             mp_context=multiprocessing.get_context("spawn"),
-            max_tasks_per_child=1000,
+            # Recycle workers now and then (PDFium leaks a little); Python 3.11+ only.
+            **({"max_tasks_per_child": 1000} if sys.version_info >= (3, 11) else {}),
         )
         # Spawn every worker and import PDFium now, so the first request isn't slow.
         futures = [self._pool.submit(worker_warmup, 0.2) for _ in range(self.workers)]

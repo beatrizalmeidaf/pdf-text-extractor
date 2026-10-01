@@ -23,6 +23,7 @@ import re
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import cached_property
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pr
@@ -1357,7 +1358,7 @@ class Line:
     def size(self) -> float:
         return max(self.spans, key=lambda s: len(s.chars)).size
 
-    @property
+    @cached_property
     def bold(self) -> bool:
         # By glyph: a line with a few words in bold is not a bold line.
         chars = [c for s in self.spans for c in s.chars]
@@ -1646,11 +1647,19 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
         else:
             text = _join_lines(group, edges)
             b = Block(kind, (x0, y0, x1, y1), text=text)
-            runs = _runs(group, edges)
+            # Runs only where formatting varies (or isn't plain): most paragraphs are neither.
+            looks = {
+                (s.fonts[c.font].bold, s.fonts[c.font].italic)
+                for ln in group
+                for s in ln.spans
+                for c in s.chars
+            }
+            plain = looks == {(False, False)} and not any(ln.has_scripts for ln in group)
+            runs = [] if plain else _runs(group, edges)
             if kind == "list_item":
                 b.marker = _is_list_start(text)
                 b.text = text.lstrip()[len(b.marker) :].strip() if b.marker else text
-                if b.marker:
+                if b.marker and runs:
                     runs = _strip_prefix(runs, b.marker)
             # Only when formatting varies (or isn't plain): plain text needs no runs.
             if len(runs) > 1 or (

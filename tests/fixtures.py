@@ -306,7 +306,7 @@ def hard_cases_pdf(path: Path) -> Path:
                 ["Custos de APIs", "Baixa", "Médio", "Alternativas"],
             ]:
                 x = 20
-                for text, wd in zip(row, widths, strict=True):
+                for text, wd in zip(row, (55, 40, 30, 45), strict=True):  # text fits any font
                     pdf.rect(x, ty, wd, 6)
                     pdf.set_xy(x, ty)
                     pdf.cell(wd, 6, text)
