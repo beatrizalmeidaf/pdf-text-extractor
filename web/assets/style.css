@@ -358,9 +358,6 @@ legend { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-sp
 .diff-bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 16px; font-size: 13px; }
 .diff-bar .check { align-items: center; }
 .diff-bar .check input { margin-top: 0; }
-.diff-opacity { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.diff-opacity[hidden] { display: none; }
-.diff-opacity input { accent-color: var(--accent); width: 130px; }
 .diff-legend { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; color: var(--muted); font-size: 12.5px; margin-left: auto; }
 .diff-legend i { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
 .diff-legend .miss { background: color-mix(in srgb, var(--danger) 35%, transparent); outline: 1px solid var(--danger); }
@@ -378,11 +375,6 @@ legend { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-sp
 .diff-pane { position: relative; background: #fff; color: #16161a; box-shadow: var(--shadow); border-radius: 4px; overflow: hidden; }
 .diff-pane canvas { display: block; }
 .diff-pane .miss { position: absolute; background: color-mix(in srgb, var(--danger) 30%, transparent); outline: 1px solid var(--danger); border-radius: 2px; pointer-events: none; }
-/* Overlay: the output on top of the PDF, as see-through as the slider says. */
-.diff-list.overlay .diff-panes { display: grid; justify-content: center; }
-.diff-list.overlay .diff-panes figure { grid-area: 1 / 1; }
-.diff-list.overlay figcaption { display: none; }
-.diff-list.overlay figure + figure .diff-pane { opacity: var(--diff-opacity, .6); box-shadow: none; }
 
 /* A block of the output, drawn where it is on the page. */
 .rb {
