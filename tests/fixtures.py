@@ -431,7 +431,8 @@ def declaration_pdf(path: Path) -> Path:
 def exam_pdf(path: Path) -> Path:
     """An exam question the way equation editors draw it (no real data): an exponent set a
     little smaller and raised, a stacked fraction (numerator, rule, denominator), a root sign
-    made of strokes over its radicand, and chemical indices with the state of matter."""
+    made of strokes over its radicand, chemical indices with the state of matter, and two
+    options full of exponents on consecutive lines."""
     pdf, F = _pdf()
     pdf.add_page()
     pdf.set_line_width(0.2)
@@ -479,5 +480,21 @@ def exam_pdf(path: Path) -> Path:
     x = run(x, 73.4, "2", size * 0.9)
     x = run(x, 72, "O")
     run(x, 73.4, "(l)", size * 0.9)
+
+    # d) e): powers of ten, one option per line with no space between the lines
+    for k, (mark, a, p, b, q) in enumerate(
+        (("d)", "1,035", "9", "5,5", "7"), ("e)", "5,000", "3", "1,0", "6"))
+    ):
+        y = 84 + 6 * k
+        run(20, y, mark)
+        x = run(30, y, f"{a}·10")
+        x = run(x, y - 1.6, p, size * 0.9)
+        x = run(x, y, f" e {b}·10")
+        run(x, y - 1.6, q, size * 0.9)
+
+    # A sentence of given values, with an exponent and as many "=" as a formula has.
+    x = run(20, 104, "Dados: massas molares (g·mol")
+    x = run(x, 102.4, "-1", size * 0.9)
+    run(x, 104, ") H = 1, C = 12, N = 14, O = 16")
     pdf.output(str(path))
     return path
