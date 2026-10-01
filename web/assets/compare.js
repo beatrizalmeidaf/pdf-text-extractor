@@ -1,4 +1,4 @@
-// Compare view: each page of the PDF next to (or under) what was extracted from it, drawn
+// Compare view: each page of the PDF next to what was extracted from it, drawn
 // block by block in the same place — so a table that came out as text, a formula that came
 // out empty or a paragraph that is missing is seen at a glance. On the PDF side, the text
 // that is not in the output is marked; on the output side, the blocks that failed a check.
@@ -115,13 +115,11 @@ function paintOutput(pane, page, scale, flags, ctx) {
   for (const el of els) if (!el.querySelector("img")) fit(el);
 }
 
-// `mode`: "side" (two pages next to each other) or "overlay" (the output over the PDF).
-export function renderCompare(list, { doc, pdf, fidelity, mode, onlyProblems, tr, typeLabel, onSelect }) {
+export function renderCompare(list, { doc, pdf, fidelity, onlyProblems, tr, typeLabel, onSelect }) {
   observer?.disconnect();
   list.innerHTML = "";
-  list.className = `diff-list ${mode}`;
   const avail = (list.clientWidth || 800) - 18; // room for the scrollbar the pages bring in
-  const side = mode === "side" && avail >= 640;
+  const side = avail >= 640; // narrower than that, the output goes under its page
   const paneWidth = side ? (avail - 16) / 2 : Math.min(avail, 900);
   const ctx = { tr, typeLabel, onSelect };
   const jobs = new Map();
