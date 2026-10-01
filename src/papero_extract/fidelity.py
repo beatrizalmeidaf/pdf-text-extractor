@@ -148,7 +148,8 @@ def _coverage(reference: str, output: str) -> tuple[int, int]:
     out = _fold(output)
     have = Counter(_TOKEN.findall(out))
     # Without separators: a word hyphenated at a line end, or split by an accent drawn as
-    # its own glyph, is still there.
+    # its own glyph, is still there. Not for numbers: "30" is inside too many other things,
+    # and the cells of a table that was lost would all be "found".
     stream = "".join(_TOKEN.findall(out))
     matched = total = 0
     for token in _TOKEN.findall(_fold(reference)):
@@ -158,7 +159,7 @@ def _coverage(reference: str, output: str) -> tuple[int, int]:
         if have[token] > 0:
             have[token] -= 1
             matched += len(token)
-        elif token in stream:
+        elif not token.isdigit() and token in stream:
             matched += len(token)
     return matched, total
 
