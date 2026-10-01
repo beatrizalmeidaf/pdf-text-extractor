@@ -266,6 +266,14 @@ def test_chemical_indices_and_state_of_matter(exam):
     assert _text_of(exam, "c)").endswith("CO₂(g) + H₂O(l)")
 
 
+def test_options_with_exponents_stay_one_per_line(exam):
+    # (As formulas, the two lines would run together into one block.)
+    items = {b.marker: b.text for b in exam if b.type == "list_item"}
+    assert items["d)"] == "1,035·10⁹ e 5,5·10⁷"  # and the word gap after the exponent is kept
+    assert items["e)"] == "5,000·10³ e 1,0·10⁶"
+    assert not any(b.type == "formula" for b in exam)
+
+
 # ----------------------------------------------------------------- columns, TeX fonts
 def test_gutter_between_two_columns_despite_a_spanning_title():
     from papero_extract.columns import area_of, bands, columns
