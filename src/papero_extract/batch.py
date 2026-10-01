@@ -46,6 +46,7 @@ _HTML_LIMIT = 500  # problematic documents listed in summary.html (all are in re
 class BatchOptions:
     formats: tuple[str, ...] = FORMATS
     chunk_chars: int = 1500
+    math: str = "unicode"  # "latex": math in the Markdown and in the chunks as $…$
     tables: bool = True
     formulas: bool = True
     ocr: str = "auto"
@@ -103,7 +104,7 @@ def process_document(source: str, name: str, stem: str, out: str, opts: BatchOpt
             path = Path(out, "documents", stem + _SUFFIX[fmt])
             _long(path.parent).mkdir(parents=True, exist_ok=True)
             if fmt == "markdown":
-                text = doc.to_markdown(images="none")
+                text = doc.to_markdown(images="none", math=opts.math)
             else:
                 body = doc.to_dict(embed_images=False, include_markdown=False)
                 text = json.dumps(body, ensure_ascii=False)
@@ -111,7 +112,7 @@ def process_document(source: str, name: str, stem: str, out: str, opts: BatchOpt
             outputs[fmt] = path.relative_to(out).as_posix()
     except OSError as exc:
         return _failed(name, source, "write_failed", f"{type(exc).__name__}: {exc}")
-    chunks = chunk_document(doc, document=name, max_chars=opts.chunk_chars)
+    chunks = chunk_document(doc, document=name, max_chars=opts.chunk_chars, math=opts.math)
     return {
         "document": name,
         "source": source,
