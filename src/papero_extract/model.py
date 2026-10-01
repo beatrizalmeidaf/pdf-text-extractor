@@ -176,6 +176,11 @@ class Document:
 
         return to_text(self)
 
+    def to_text(self, **kwargs) -> str:
+        from .render import to_text
+
+        return to_text(self, **kwargs)
+
     def to_markdown(self, **kwargs) -> str:
         from .render import to_markdown
 
