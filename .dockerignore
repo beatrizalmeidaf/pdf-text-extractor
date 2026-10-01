@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+tests
+benchmarks
+docs
+*.pdf
+!web/assets/exemplo.pdf

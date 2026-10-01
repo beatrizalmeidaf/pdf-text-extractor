@@ -1,0 +1,21 @@
+services:
+  api:
+    build: .
+    # image: ghcr.io/beatrizalmeidaf/pdf-text-extractor:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/app
+
+  # Alternative: run Tika in its own container and point the API to it.
+  #   tika:
+  #     image: apache/tika:latest-full   # includes Tesseract
+  #   api:
+  #     environment:
+  #       PTE_TIKA_URL: http://tika:9998

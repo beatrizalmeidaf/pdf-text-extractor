@@ -1,48 +1,36 @@
-FROM python:3.9-slim
+# ---- build: wheels for the app and its dependencies ----
+FROM python:3.12-slim AS build
+WORKDIR /src
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY web ./web
+RUN pip wheel --wheel-dir /wheels ".[api]"
 
-# diretório de trabalho no container
-WORKDIR /code
-
-# instalar dependências do sistema e Java para o Apache Tika
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        default-jre \
-        curl \
-        wget \
-        procps \
-        netcat-openbsd && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# baixar o servidor Apache Tika
-RUN mkdir -p /opt/tika && \
-    wget https://archive.apache.org/dist/tika/2.6.0/tika-server-standard-2.6.0.jar \
-    -O /opt/tika/tika-server.jar
-
-# criar diretórios da estrutura do projeto
-RUN mkdir -p /code/config /code/services /code/utils /code/interfaces
-
-# copiar requirements e instalar dependências do Python
-COPY requirements.txt /code/requirements.txt
-RUN pip install --no-cache-dir -r /code/requirements.txt
-
-# copiar o código da aplicação
-COPY config/ /code/config/
-COPY services/ /code/services/
-COPY utils/ /code/utils/
-COPY interfaces/ /code/interfaces/
-COPY app.py /code/app.py
-COPY start.sh /code/start.sh
-
-# tornar o script executável
-RUN chmod +x /code/start.sh
-
-# definir variáveis de ambiente
-ENV PORT=7860
-
-# expor portas: 7860 (app), 9998 (Tika)
-EXPOSE 7860
-EXPOSE 9998
-
-# comando para iniciar a aplicação e o Tika
-CMD ["/code/start.sh"]
+# ---- runtime: Python + Java (Tika Server) + Tesseract (OCR), non-root ----
+FROM python:3.12-slim
+ARG TIKA_VERSION=3.3.2
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000 \
+    PTE_TIKA_JAR=/opt/tika/tika-server.jar \
+    PTE_TIKA_JAVA_OPTS="-Xshare:auto -XX:+UseParallelGC -XX:MaxRAMPercentage=50"
+COPY --from=build /wheels /wheels
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      default-jre-headless tesseract-ocr tesseract-ocr-por tesseract-ocr-eng curl ca-certificates \
+ && mkdir -p /opt/tika \
+ && curl -fsSL -o /opt/tika/tika-server.jar \
+      "https://repo1.maven.org/maven2/org/apache/tika/tika-server-standard/${TIKA_VERSION}/tika-server-standard-${TIKA_VERSION}.jar" \
+ && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-index --find-links=/wheels "pdf-text-api[api]" \
+ && rm -rf /wheels \
+ && useradd --create-home --uid 10001 app
+USER app
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
+  CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/health', timeout=2)"
+# One uvicorn process (async I/O + Tika calls) + PTE_WORKERS layout processes (CPU).
+# Tika Server is started and warmed up by the app itself on startup.
+CMD ["sh", "-c", "exec uvicorn pdf_text_api.api:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*' --timeout-keep-alive 30"]
