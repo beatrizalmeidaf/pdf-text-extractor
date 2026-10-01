@@ -355,9 +355,12 @@ def _typeset_math(chars: list[Char], g: Graphics) -> list[Char]:
             if x0 - size * 1.2 <= b[0] and b[2] <= x0 + 2 and b[1] < bottom and b[3] > top
         ]
         hook = [x for x, _ in strokes] if any(h >= size * 0.4 for _, h in strokes) else []
+        # (A rule far wider than the bar is the frame around the whole line, not its floor.)
         closed = any(
             bottom - size * 0.3 <= yy <= bottom + size * 0.5
             and min(b, x1) - max(a, x0) >= (x1 - x0) * 0.5
+            and a >= x0 - size * 2
+            and b <= x1 + size * 2
             for yy, a, b in g.hrules
         )
         if not hook or min(hook) > x0 - size * 0.12 or closed:
@@ -1867,8 +1870,39 @@ def _formula_like(line: Line) -> bool:
         line.math >= 0.4
         or score >= 0.22
         or (line.has_scripts and score >= 0.1)
-        or ("=" in text and len(words) <= 1 and any(c.isdigit() or c.isalpha() for c in compact))
+        or (
+            "=" in text
+            and len(words) <= 1
+            and not _named_value(text)
+            and any(c.isdigit() or c.isalpha() for c in compact)
+        )
     )
+
+
+_PAIR = re.compile(r"(\S+)\s*=\s*(\S+)")
+
+
+def _named_value(text: str) -> bool:
+    """A word and what it stands for, nothing else: "8 = Eight", "Size = 64"."""
+    pair = _PAIR.fullmatch(text.strip())
+    sides = [s.replace("-", "").replace("–", "") for s in pair.groups()] if pair else []
+    return any(len(s) > 3 and s.isalpha() for s in sides)
+
+
+_RELATIONS = frozenset("=→⇒⇔←↔⇌≤≥<>≈≡∼")
+_LEADING_OPERATORS = frozenset("=+-−–×·÷→⇒⇔≤≥<>≈≡∼,")
+
+
+def _new_equation(prev: Line, ln: Line, size: float) -> bool:
+    """Two formula lines, one under the other: the second is an equation of its own (the next
+    reaction, the next given value) when both state something and it does not pick up where
+    the first stopped — no operator at the break. Limits under a sum are smaller type."""
+    first, second = prev.text.strip(), ln.text.strip()
+    if abs(ln.size - prev.size) > size * 0.15:
+        return False
+    if not any(c in _RELATIONS for c in first) or not any(c in _RELATIONS for c in second):
+        return False
+    return second[0] not in _LEADING_OPERATORS and first[-1] not in _LEADING_OPERATORS
 
 
 def _join_lines(lines: list[Line], edges: dict[int, float] | None = None) -> str:
@@ -2194,7 +2228,11 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
             if kind == "code":
                 continues = this_kind == "code" and gap <= size * 1.2 and overlap > -size
             elif kind == "formula":
-                continues = this_kind == "formula" and gap <= size * 0.9
+                continues = (
+                    this_kind == "formula"
+                    and gap <= size * 0.9
+                    and not _new_equation(prev, ln, size)
+                )
             elif this_kind in ("list_item", "formula", "code"):
                 continues = False
             elif kind == "list_item":
