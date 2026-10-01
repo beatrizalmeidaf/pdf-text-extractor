@@ -11,31 +11,40 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 from .columns import bands
+from .mathtext import inline_latex, latexify, math_spans, script_text
 from .model import FURNITURE, Block
 
 if TYPE_CHECKING:
     from .model import Document
 
 ImageMode = Literal["ref", "embed", "none"]
+# How math in running text is written: as it reads ("x² + 1 = 0") or as LaTeX ("$x^{2} + 1 = 0$").
+MathMode = Literal["unicode", "latex"]
 
 
 # ----------------------------------------------------------------------------- text
-def blocks_to_text(blocks: Iterable[Block]) -> str:
+def blocks_to_text(blocks: Iterable[Block], math: MathMode = "unicode") -> str:
+    latex = math == "latex"
     parts = []
     for b in blocks:
+        text = inline_latex(b.text) if latex and b.type not in ("formula", "code") else b.text
         if b.type == "table" and b.rows:
             parts.append("\n".join("\t".join(c.replace("\n", " ") for c in r) for r in b.rows))
         elif b.type == "list_item":
-            parts.append("  " * (b.level or 0) + f"{b.marker or '-'} {b.text}")
+            parts.append("  " * (b.level or 0) + f"{b.marker or '-'} {text}")
         elif b.type == "formula":
-            parts.append(b.text + (f"  {b.number}" if b.number else ""))
-        elif b.text:
-            parts.append(b.text)
+            body = f"$${b.latex or b.text}$$" if latex else b.text
+            parts.append(body + (f"  {b.number}" if b.number else ""))
+        elif text:
+            parts.append(text)
     return "\n\n".join(p for p in parts if p.strip())
 
 
-def to_text(doc: Document) -> str:
-    return "\n\n".join(t for t in (blocks_to_text(p.content) for p in doc.pages) if t.strip())
+def to_text(doc: Document, *, math: MathMode = "unicode") -> str:
+    """Plain text in reading order. `math="latex"` writes formulas as `$$…$$` and the math
+    inside paragraphs as `$…$`."""
+    pages = (blocks_to_text(p.content, math) for p in doc.pages)
+    return "\n\n".join(t for t in pages if t.strip())
 
 
 # ----------------------------------------------------------------------------- markdown
@@ -61,6 +70,7 @@ def _image_md(b: Block, images: ImageMode, alt: str) -> str | None:
     return f"![{alt}](images/{b.image.name})"
 
 
+_MD_LIST = re.compile(r"\s*(-|\d+[.)]) ")  # what Markdown reads as a list item
 _NUMBER = re.compile(r"^[-+−]?[\d.,%]+$")
 
 
@@ -75,8 +85,23 @@ def figure_words(text: str) -> list[str]:
     return out
 
 
-def md_inline(b: Block) -> str:
+def _emphasis(text: str, bold: bool, italic: bool) -> str:
+    """**bold** / *italic* around the words, the spaces at either end left outside."""
+    core = text.strip()
+    if not core:
+        return text
+    lead, trail = text[: len(text) - len(text.lstrip())], text[len(text.rstrip()) :]
+    if italic:
+        core = f"*{core}*"
+    if bold:
+        core = f"**{core}**"
+    return lead + core + trail
+
+
+def md_inline(b: Block, math: MathMode = "unicode") -> str:
     """Inline formatting as Markdown: **bold**, *italic*, <sup>/<sub>; kept line breaks."""
+    if math == "latex":
+        return _md_inline_latex(b)
     if not b.runs:
         return b.text.replace("\n", "  \n")
     out = []
@@ -91,12 +116,37 @@ def md_inline(b: Block) -> str:
         if r.get("script"):
             tag = "sup" if r["script"] == "super" else "sub"
             t = f"<{tag}>{t}</{tag}>"
-        if r.get("italic"):
-            t = f"*{t}*"
-        if r.get("bold"):
-            t = f"**{t}**"
-        out.append(lead + t + trail)
+        out.append(lead + _emphasis(t, bool(r.get("bold")), bool(r.get("italic"))) + trail)
     return "".join(out).replace("\n", "  \n")
+
+
+def _md_inline_latex(b: Block) -> str:
+    """The block with its math as `$…$` (exponents and indices inside it), bold and italic
+    kept on the words around."""
+    text = ""
+    looks: list[tuple[bool, bool]] = []  # (bold, italic) of each character
+    for r in b.runs or [{"text": b.text}]:
+        t = r["text"]
+        if r.get("script"):
+            script = script_text(t.strip(), r["script"] == "super")
+            t = script + (" " if t[-1:].isspace() else "")
+        text += t
+        looks += [(bool(r.get("bold")), bool(r.get("italic")))] * len(t)
+
+    def plain(start: int, end: int) -> str:
+        out, at = [], start
+        for k in range(start, end + 1):
+            if k == end or looks[k] != looks[at]:
+                piece = text[at:k].replace("*", "\\*").replace("$", "\\$")
+                out.append(_emphasis(piece, *looks[at]) if at < k else "")
+                at = k
+        return "".join(out)
+
+    out, at = [], 0
+    for start, end in math_spans(text):
+        out.append(plain(at, start) + "$" + latexify(text[start:end]) + "$")
+        at = end
+    return ("".join(out) + plain(at, len(text))).replace("\n", "  \n")
 
 
 def html_inline(b: Block) -> str:
@@ -134,15 +184,16 @@ def html_style(b: Block) -> str:
     return f' style="{";".join(css)}"' if css else ""
 
 
-def block_markdown(b: Block, images: ImageMode = "ref") -> str:
+def block_markdown(b: Block, images: ImageMode = "ref", math: MathMode = "unicode") -> str:
     t = b.type
+    text = inline_latex(b.text) if math == "latex" else b.text
     if t == "heading":
-        return "#" * min(6, max(1, b.level or 2)) + " " + b.text.replace("\n", " ")
+        return "#" * min(6, max(1, b.level or 2)) + " " + text.replace("\n", " ")
     if t == "list_item":
         marker = b.marker or "-"
         if marker[:1] in "•◦▪▫‣⁃●○■□–—*✓✔➢➤►▶·-":
             marker = "-"
-        return "  " * (b.level or 0) + f"{marker} {md_inline(b)}"
+        return "  " * (b.level or 0) + f"{marker} {md_inline(b, math)}"
     if t == "table" and b.rows:
         # The crop of the table stays in JSON/ZIP: repeating it here would duplicate the table.
         return md_table(b.rows)
@@ -159,10 +210,10 @@ def block_markdown(b: Block, images: ImageMode = "ref") -> str:
             out += "\n\n" + "\n".join(f"> {ln}" for ln in words)
         return out
     if t == "caption":
-        return f"*{b.text}*"
+        return f"*{text}*"
     if t == "code":
         return f"```\n{b.text}\n```"
-    return md_inline(b)
+    return md_inline(b, math)
 
 
 def to_markdown(
@@ -171,8 +222,10 @@ def to_markdown(
     images: ImageMode = "ref",
     page_breaks: bool = False,
     furniture: bool = False,
+    math: MathMode = "unicode",
 ) -> str:
-    """Markdown in reading order. `images`: "ref" -> images/<name>, "embed" -> data URI."""
+    """Markdown in reading order. `images`: "ref" -> images/<name>, "embed" -> data URI.
+    `math="latex"` writes the math inside paragraphs as `$…$` instead of <sup>/<sub>."""
     out: list[str] = []
     for page in doc.pages:
         if page_breaks and out:
@@ -180,12 +233,13 @@ def to_markdown(
         blocks = page.blocks if furniture else page.content
         prev: Block | None = None
         for b in blocks:
-            md = block_markdown(b, images)
+            md = block_markdown(b, images, math)
             if not md.strip():
                 continue
-            # Consecutive list items stay tight.
+            # Consecutive list items stay tight. "a) …" is not a list to Markdown, which would
+            # run such lines together: they end in a hard break.
             if prev is not None and prev.type == "list_item" and b.type == "list_item" and out:
-                out[-1] += "\n" + md
+                out[-1] += ("\n" if _MD_LIST.match(md) else "  \n") + md
             else:
                 out.append(md)
             prev = b
