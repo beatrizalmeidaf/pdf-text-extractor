@@ -1,28 +1,18 @@
-# python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
 *.egg-info/
-.installed.cfg
-*.egg
-
-# diretórios de aplicação
-uploads/
-output/
-
-# logs
+build/
+dist/
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+.coverage
 *.log
+benchmarks/dataset/
+
+# JS engine parity test
+tests/js/node_modules/
+tests/js/out/
+tests/js/.engine.node.mjs
