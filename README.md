@@ -169,11 +169,11 @@ Acesse http://localhost:8000. Tudo é configurável por variáveis de ambiente (
 
 Para usar a interface gráfica direto no navegador, abra o arquivo `docs/index.html` e aponte para `http://localhost:8000`.
 
-## ⚡ Desempenho (Massive Benchmark)
+## Desempenho (Massive Benchmark)
 
 Testado com um dataset real de **50 PDFs acadêmicos** baixados do **arXiv** (papers densos de Inteligência Artificial, média de 15 páginas, em múltiplas colunas e com equações matemáticas). 
 
-> ⚠️ **Metodologia Importante:** Todos os testes abaixo foram executados estritamente em **CPU local**, sem uso de nenhuma aceleração por placa de vídeo (GPU), simulando ambientes de servidores comuns e lambdas.
+> **Metodologia Importante:** Todos os testes abaixo foram executados estritamente em **CPU local**, sem uso de nenhuma aceleração por placa de vídeo (GPU), simulando ambientes de servidores comuns e lambdas.
 
 O motor TikaClient otimizado roda na JVM com `keep-alive` habilitado e anti-kerning acionado.
 
