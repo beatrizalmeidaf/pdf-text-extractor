@@ -316,6 +316,8 @@ export async function toDocx(doc) {
 
   // Captions that are blocks of their own: the figure/table must not print them again.
   const captions = new Set(allBlocks(doc).filter((b) => b.type === "caption").map((b) => b.text));
+  // The space above a table: a paragraph one point tall carrying it.
+  const spacer = (before) => `<w:p><w:pPr><w:spacing w:before="${Math.round(Math.max(0, before - 1) * TWIP)}" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>`;
   // One block -> one or more <w:p>/<w:tbl>, with `before` points of space above it.
   const blockXml = (b, before) => {
     switch (b.type) {
@@ -335,10 +337,19 @@ export async function toDocx(doc) {
         const col = Math.round(total / width);
         const pt = b.style?.pt;
         const cellRun = (t, bold) => ({ text: t, style: { pt, font: b.style?.font, bold }, runs: [{ text: t, bold, italic: false, script: null }] });
-        const rows = b.rows.map((r, ri) => `<w:tr>${[...r, ...Array(width - r.length).fill("")].map((c) =>
+        // Rows as tall as on the page (Word's own row height is looser).
+        const lineCount = (r) => Math.max(1, ...r.map((c) => String(c).split(String.fromCharCode(10)).length));
+        const allLines = b.rows.reduce((n, r) => n + lineCount(r), 0);
+        const rowHeight = (r) => {
+          if (!b.bbox) return "";
+          const h = ((b.bbox[3] - b.bbox[1]) * lineCount(r)) / allLines;
+          const rule = h >= (pt || 10) * lineCount(r) * 1.02 ? "exact" : "atLeast";
+          return `<w:trPr><w:trHeight w:val="${Math.round(h * TWIP)}" w:hRule="${rule}"/></w:trPr>`;
+        };
+        const rows = b.rows.map((r, ri) => `<w:tr>${rowHeight(r)}${[...r, ...Array(width - r.length).fill("")].map((c) =>
           `<w:tc><w:tcPr><w:tcW w:w="${col}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>${docxRuns(cellRun(String(c), ri === 0))}</w:p></w:tc>`).join("")}</w:tr>`).join("");
         const borders = ["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`).join("");
-        let out = `<w:p>${docxParaProps({}, before)}</w:p><w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${Array(width).fill(`<w:gridCol w:w="${col}"/>`).join("")}</w:tblGrid>${rows}</w:tbl>`;
+        let out = `${spacer(before)}<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${Array(width).fill(`<w:gridCol w:w="${col}"/>`).join("")}</w:tblGrid>${rows}</w:tbl>`;
         if (b.caption && !captions.has(b.caption)) out += `<w:p><w:pPr><w:pStyle w:val="Caption"/></w:pPr>${docxRuns({ text: b.caption, runs: [{ text: b.caption, italic: true }] })}</w:p>`;
         return out;
       }
@@ -415,7 +426,7 @@ export async function toDocx(doc) {
         // Word adds ~5.4 pt of padding on each side of a cell: give each one that room.
         const widths = row.map((r, k) => Math.round(((k + 1 < row.length ? row[k + 1].bbox[0] : r.bbox[2] + 24) - r.bbox[0] + 12) * TWIP));
         const cells = row.map((r, k) => `<w:tc><w:tcPr><w:tcW w:w="${widths[k]}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${blockXml({ ...r, format: { ...(r.format || {}), indent: 0 } }, 0) || "<w:p/>"}</w:tc>`).join("");
-        out.push(`<w:p>${docxParaProps({}, before)}</w:p><w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblInd w:w="${Math.round(Math.max(0, x0 - left) * TWIP)}" w:type="dxa"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="nil"/>`).join("")}</w:tblBorders></w:tblPr><w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>`);
+        out.push(`${spacer(before)}<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblInd w:w="${Math.round(Math.max(0, x0 - left) * TWIP)}" w:type="dxa"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="nil"/>`).join("")}</w:tblBorders></w:tblPr><w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>`);
         bottom = Math.max(bottom + before, Math.max(...row.map((r) => r.bbox[3])));
         i += row.length - 1;
         continue;

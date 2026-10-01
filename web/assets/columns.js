@@ -11,12 +11,21 @@ export function gutters(boxes) {
   const left = Math.min(...boxes.map((b) => b[0])), right = Math.max(...boxes.map((b) => b[2]));
   const n = Math.floor((right - left) / STEP) + 1;
   if (n < 20) return [];
-  const cover = new Array(n).fill(0); // how much text height crosses each strip
+  // How much text height crosses each strip. Blocks as wide as the page (a table and a
+  // figure over two short columns of text) say nothing about a gutter: they are counted
+  // apart, only to tell how much of the page the columns are.
+  const cover = new Array(n).fill(0), everything = new Array(n).fill(0);
   for (const [x0, y0, x1, y1] of boxes) {
+    const wide = x1 - x0 > (right - left) * 0.6;
     const to = Math.min(n, Math.floor((x1 - left) / STEP));
-    for (let k = Math.max(0, Math.floor((x0 - left) / STEP) + 1); k < to; k++) cover[k] += y1 - y0;
+    for (let k = Math.max(0, Math.floor((x0 - left) / STEP) + 1); k < to; k++) {
+      everything[k] += y1 - y0;
+      if (!wide) cover[k] += y1 - y0;
+    }
   }
   const peak = Math.max(...cover);
+  if (peak <= 0) return [];
+  const whole = Math.max(...everything);
   const out = [];
   let k = 0;
   while (k < n) {
@@ -32,7 +41,7 @@ export function gutters(boxes) {
       while (b < j && cover[b] <= floor + peak * 0.02) b++;
       if (a > 0 && b < n && (b - a) * STEP >= MIN_GUTTER) {
         const sides = Math.min(Math.max(...cover.slice(0, a)), Math.max(...cover.slice(b)));
-        if (sides >= peak * 0.15 && floor <= sides * 0.4) out.push([left + a * STEP, left + b * STEP]);
+        if (sides >= Math.max(peak, whole * 0.6) * 0.15 && floor <= sides * 0.4) out.push([left + a * STEP, left + b * STEP]);
       }
       a = b;
     }

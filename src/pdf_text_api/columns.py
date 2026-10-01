@@ -23,11 +23,21 @@ def gutters(boxes: Sequence[Box]) -> list[tuple[float, float]]:
     n = int((right - left) / STEP) + 1
     if n < 20:
         return []
-    cover = [0.0] * n  # how much text height crosses each strip
+    # How much text height crosses each strip. Blocks as wide as the page (a table and a
+    # figure over two short columns of text) say nothing about a gutter: they are counted
+    # apart, only to tell how much of the page the columns are.
+    cover = [0.0] * n
+    everything = [0.0] * n
     for x0, y0, x1, y1 in boxes:
+        wide = x1 - x0 > (right - left) * 0.6
         for k in range(max(0, int((x0 - left) / STEP) + 1), min(n, int((x1 - left) / STEP))):
-            cover[k] += y1 - y0
+            everything[k] += y1 - y0
+            if not wide:
+                cover[k] += y1 - y0
     peak = max(cover)
+    if peak <= 0:
+        return []
+    whole = max(everything)
     out = []
     k = 0
     while k < n:
@@ -51,7 +61,7 @@ def gutters(boxes: Sequence[Box]) -> list[tuple[float, float]]:
                 a > 0
                 and b < n
                 and (b - a) * STEP >= MIN_GUTTER
-                and min(max(cover[:a]), max(cover[b:])) >= peak * 0.15
+                and min(max(cover[:a]), max(cover[b:])) >= max(peak, whole * 0.6) * 0.15
                 and floor <= min(max(cover[:a]), max(cover[b:])) * 0.4
             ):
                 out.append((left + a * STEP, left + b * STEP))
