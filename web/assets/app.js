@@ -1,4 +1,6 @@
-import { extractDocument, openPdf } from "./engine.js";
+import { renderCompare, renderFidelity } from "./compare.js";
+import { captionText, extractDocument, openPdf } from "./engine.js";
+import { assess, referenceItems } from "./fidelity.js";
 import { applyStatic, lang, setLang, t as tr } from "./i18n.js";
 import { FORMATS, esc, exportAs, imagesOf, tablesCsv, tablesOf, toJson, toMarkdown, toText } from "./export.js";
 
@@ -11,7 +13,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 
-const state = { file: null, data: null, doc: null, pdf: null, hidden: new Set(["header", "footer", "page_number"]), selected: null };
+const state = { file: null, data: null, doc: null, pdf: null, hidden: new Set(["header", "footer", "page_number"]), selected: null, fidelity: null, hasReference: false, diffDirty: false };
 
 // ---------------------------------------------------------------- small UI helpers
 let toastTimer;
@@ -146,6 +148,7 @@ async function run() {
     }
     state.doc = doc;
     state.selected = null;
+    state.fidelity = await assessDocument(doc);
     render();
   } catch (e) {
     console.error(e);
@@ -155,6 +158,16 @@ async function run() {
     btn.disabled = false;
     setProgress(null);
   }
+}
+
+// The fidelity signals (fidelity.js), against what pdf.js reads on each page when there is a PDF.
+async function assessDocument(doc) {
+  let reference = null;
+  if (state.pdf) {
+    try { reference = await referenceItems(state.pdf, doc.pages.map((p) => p.number)); } catch { /* structure only */ }
+  }
+  state.hasReference = !!reference;
+  return assess(doc, reference, captionText);
 }
 
 async function extractOnServer(opts) {
@@ -188,7 +201,9 @@ function render() {
   const stats = $("#stats");
   stats.hidden = false;
   const t = doc.timings || {};
+  const f = state.fidelity;
   stats.innerHTML = [
+    `<button type="button" class="fid-chip ${f.status}" id="fid-chip" title="${esc(tr("fid.note"))}">${tr("stats.fidelity")} <b>${f.score == null ? "—" : (f.score * 100).toFixed(1) + "%"}</b></button>`,
     `<span><b>${doc.pages_extracted ?? doc.pages.length}</b>/${doc.page_count} ${tr("stats.pages")}</span>`,
     `<span><b>${fmtMs(doc.elapsed_ms)}</b>${t.tika_ms ? ` (Tika ${fmtMs(t.tika_ms)} ‖ layout ${fmtMs(t.layout_ms)})` : ""}</span>`,
     `<span><b>${count("heading")}</b> ${tr("stats.headings")}</span>`,
@@ -199,6 +214,9 @@ function render() {
     doc.likely_scanned ? `<span class="warn">${tr("stats.scanned")}</span>` : "",
     ...(doc.warnings || []).map((w) => `<span class="warn">${esc(w.split(":")[0])}</span>`),
   ].join("");
+  $("#fid-chip").addEventListener("click", () => switchTab("diff"));
+  state.diffDirty = true;
+  if (!$("#view-diff").hidden) renderDiff();
   $("#copy-btn").disabled = false;
   $("#export-btn").disabled = false;
   $("#empty").hidden = true;
@@ -405,6 +423,35 @@ function renderGallery(images) {
   }
 }
 
+// ---------------------------------------------------------------- compare (visual diff)
+const diffMode = () => document.querySelector('input[name="diffmode"]:checked').value;
+function renderDiff() {
+  if (!state.doc) return;
+  state.diffDirty = false;
+  const overlay = diffMode() === "overlay";
+  $("#diff-opacity-field").hidden = !overlay;
+  const list = $("#diff-list");
+  list.style.setProperty("--diff-opacity", $("#diff-opacity").value / 100);
+  renderFidelity($("#fidelity"), state.fidelity, {
+    tr,
+    hasReference: state.hasReference,
+    onPage: (n) => document.querySelector(`.diff-row[data-page="${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  });
+  renderCompare(list, {
+    doc: state.doc,
+    pdf: state.pdf,
+    fidelity: state.fidelity,
+    mode: diffMode(),
+    onlyProblems: $("#diff-only").checked,
+    tr,
+    typeLabel: (type) => TYPE_LABEL[type] || type,
+    onSelect: jumpTo,
+  });
+}
+document.querySelectorAll('input[name="diffmode"]').forEach((i) => i.addEventListener("change", renderDiff));
+$("#diff-only").addEventListener("change", renderDiff);
+$("#diff-opacity").addEventListener("input", (e) => $("#diff-list").style.setProperty("--diff-opacity", e.target.value / 100));
+
 function jumpTo(block) {
   switchTab("pages");
   const el = document.querySelector(`.box[data-id="${block.id}"]`);
@@ -419,6 +466,7 @@ function jumpTo(block) {
 function switchTab(view) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
   document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== `view-${view}`));
+  if (view === "diff" && state.diffDirty) renderDiff();
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.view)));
 
@@ -485,3 +533,15 @@ new ResizeObserver(([entry]) => {
     if (id) document.querySelector(`.box[data-id="${id}"]`)?.classList.add("sel");
   }, 150);
 }).observe($("#pages-list"));
+
+let diffWidth = 0;
+let diffTimer;
+new ResizeObserver(([entry]) => {
+  const w = Math.round(entry.contentRect.width);
+  if (!state.doc || !w || Math.abs(w - diffWidth) < 40) return;
+  const first = !diffWidth;
+  diffWidth = w;
+  if (first) return;
+  clearTimeout(diffTimer);
+  diffTimer = setTimeout(renderDiff, 150);
+}).observe($("#diff-list"));
