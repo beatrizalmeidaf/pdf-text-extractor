@@ -28,6 +28,8 @@ from functools import cached_property
 import pypdfium2 as pdfium
 import pypdfium2.raw as pr
 
+from .columns import area_of, columns
+from .columns import gutters as page_gutters
 from .model import FURNITURE, Block, ImageData, Page
 from .symbols import (
     BELOW_ACCENTS,
@@ -42,6 +44,7 @@ from .symbols import (
     to_subscript,
     to_superscript,
 )
+from .tex_fonts import NEGATED, NOT, is_tex_producer, tex_char, tex_encoding
 
 # ----------------------------------------------------------------------------- tunables
 SPAN_GAP_EM = 0.9  # gap (in font sizes) that splits a line into separate spans
@@ -99,6 +102,7 @@ class FontInfo:
     rotated: bool
     white: bool = False  # painted white: invisible unless it sits on a coloured fill or image
     pt: float = 0.0  # font size in points, as set by the PDF
+    tex: str = ""  # TeX font encoding ("oml", "oms", "omx") when the glyph codes are raw
 
 
 @dataclass(slots=True)
@@ -201,6 +205,8 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
         space = prev is not None and (
             ch.space == 2 or gap > word_gap or (ch.space and gap > word_gap * 0.6)
         )
+        if ch.c == "," and ch.space < 2:
+            space = False  # a gap left by an inline icon ("Wu [iD], Fellow"), not a word gap
         if out and out[-1][0] == kind:
             out[-1][1] += (" " if space else "") + ch.c
         else:
@@ -299,8 +305,10 @@ _is_generated = _fast(pr.FPDFText_IsGenerated, _INT, _VP, _INT)
 _HYPHEN_MARKS = (2, 0xFFFE)  # PDFium's marker for an end-of-line hyphenation
 
 
-def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float]):
-    """Every visible glyph with its loose box, font, and space/line-break hints."""
+def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float], tex: bool = False):
+    """Every visible glyph with its loose box, font, and space/line-break hints.
+
+    `tex`: the PDF was written by TeX, so raw codes of its math fonts can be decoded."""
     textpage = page.get_textpage()
     tp = ctypes.cast(textpage.raw, _VP).value
     left, _, _, top = crop
@@ -314,21 +322,55 @@ def read_chars(page: pdfium.PdfPage, crop: tuple[float, float, float, float]):
     rotated: list[Char] = []
     space, newline = 0, False
     map_errors = 0
-    for i in range(n):
-        u = _get_unicode(tp, i)
-        if u in (10, 13):
-            newline = True
-            continue
-        if u in (32, 9, 0):
-            space = max(space, 1 if _is_generated(tp, i) else 2)
-            continue
+    high = 0  # pending UTF-16 high surrogate: PDFium hands astral chars over in two units
+    negate = False  # TeX's "not" slash was seen: it strikes the next glyph ("=" -> "≠")
+
+    def font_of(i: int) -> int:
         key = _get_textobj(tp, i) or 0
         fi = font_index.get(key)
         if fi is None:
             fi = font_index[key] = len(fonts)
             obj = ctypes.cast(key, pr.FPDF_PAGEOBJECT) if key else None
-            fonts.append(_font_info(obj, font_cache))
-        c = "-" if u in _HYPHEN_MARKS else normalize_char(chr(u), fonts[fi].name)
+            info = _font_info(obj, font_cache)
+            info.tex = tex_encoding(info.name)
+            fonts.append(info)
+        return fi
+
+    for i in range(n):
+        u = _get_unicode(tp, i)
+        if 0xD800 <= u <= 0xDBFF:
+            high = u
+            continue
+        if 0xDC00 <= u <= 0xDFFF:
+            if not high:
+                continue
+            u = 0x10000 + ((high - 0xD800) << 10) + (u - 0xDC00)
+        high = 0
+        fi = None
+        mapped = None
+        if tex and u < 0x80 and not _is_generated(tp, i):
+            fi = font_of(i)
+            if fonts[fi].tex:
+                mapped = tex_char(u, fonts[fi].tex)
+        if mapped is None:
+            if u in (10, 13):
+                newline = True
+                continue
+            if u in (32, 9, 0):
+                space = max(space, 1 if _is_generated(tp, i) else 2)
+                continue
+            if u < 32 and u not in _HYPHEN_MARKS:
+                continue  # a glyph with no Unicode value: nothing readable to keep
+        elif mapped == NOT:
+            negate = True
+            continue
+        elif not mapped:
+            continue  # wide accents, pieces of horizontal braces
+        if fi is None:
+            fi = font_of(i)
+        c = mapped or ("-" if u in _HYPHEN_MARKS else normalize_char(chr(u), fonts[fi].name))
+        if negate:
+            c, negate = NEGATED.get(c, c), False
         if not c or c.isspace():
             space = max(space, 2) if c.isspace() else space
             continue
@@ -500,8 +542,39 @@ def read_graphics(page: pdfium.PdfPage, crop, width: float, height: float) -> Gr
 
 
 # ============================================================================= spans
+def _drop_caps(chars: list[Char]) -> list[Char]:
+    """A drop cap (a big "T" spanning the first lines of a paragraph) would fuse the lines
+    beside it into one. Put it on its first line, right before the word it starts."""
+    if len(chars) < 20:
+        return chars
+    typical = statistics.median(c.size for c in chars)
+    out = chars
+    for i, c in enumerate(chars[:-1]):
+        if c.size < typical * 2.2 or not c.c.isalpha():
+            continue
+        n = chars[i + 1]
+        if (
+            n.size > typical * 1.5
+            or not c.y0 <= n.cy <= c.y1
+            or not -1 <= n.x0 - c.x1 <= typical * 1.5
+        ):
+            continue
+        beside = any(
+            o.size <= typical * 1.5
+            and n.y1 < o.cy < c.y1
+            and c.x1 - 1 <= o.x0 <= c.x1 + typical * 1.5
+            for o in chars[i + 2 : i + 600]
+        )
+        if beside:
+            out = list(out) if out is chars else out
+            w = n.size * 0.7
+            out[i] = Char(c.c, n.x0 - w - 0.1, n.y0, n.x0 - 0.1, n.y1, c.font, c.space, c.newline)
+    return out
+
+
 def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
     """Group chars into visual lines (stream order + geometry), then split at wide gaps."""
+    chars = _drop_caps(chars)
     raw_lines: list[list[Char]] = []
     cur: list[Char] = []
     for ch in chars:
@@ -518,9 +591,23 @@ def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
         raw_lines.append(cur)
 
     raw_lines = _merge_fragments(raw_lines)
+    # The page's column gutters, from its runs of words: a gap that swallows a whole gutter
+    # joins two columns (an equation number drawn right before the next column's line).
+    runs = []
+    for line in raw_lines:
+        size = max(statistics.median(c.size for c in line), 4)
+        start = 0
+        for i in range(1, len(line) + 1):
+            if i < len(line) and line[i].x0 - line[i - 1].x1 <= size * 0.5:
+                continue
+            run = line[start:i]
+            runs.append(
+                (run[0].x0, min(c.y0 for c in run), max(c.x1 for c in run), max(c.y1 for c in run))
+            )
+            start = i
+    gaps = page_gutters(runs)
     spans: list[Span] = []
     for line in raw_lines:
-        line.sort(key=lambda c: c.x0)
         line = _compose_accents(line)
         size = max(statistics.median(c.size for c in line), 4)
         # Justified lines stretch every word gap by about the same amount, so a gap only
@@ -528,6 +615,9 @@ def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
         pairs = list(zip(line, line[1:], strict=False))
         word_gaps = [b.x0 - a.x1 for a, b in pairs if b.space or b.x0 - a.x1 > size * WORD_GAP_EM]
         typical = statistics.median(word_gaps) if len(word_gaps) >= 3 else 0.0
+        # The line sets its word gaps with real space glyphs: a gap this wide without one is
+        # a jump of the pen — an equation number followed by the next column's line.
+        spaced = sum(c.space == 2 for c in line) >= 3
         piece = [line[0]]
         for prev, ch in pairs:
             gap = ch.x0 - prev.x1
@@ -536,6 +626,10 @@ def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
             )
             if ch.space == 2 and gap < size * JUSTIFIED_GAP_EM:
                 wide = False  # a real space char means "same text run"
+            if spaced and ch.space != 2 and gap > size * SPAN_GAP_EM:
+                wide = True
+            if any(prev.x1 <= g0 + 2.5 and ch.x0 >= g1 - 2.5 for g0, g1 in gaps):
+                wide = True
             if wide:
                 spans.append(Span(piece, fonts))
                 piece = []
@@ -584,17 +678,48 @@ def _compose_accents(line: list[Char]) -> list[Char]:
     return out
 
 
+def _order_line(fragments: list[list[Char]]) -> list[Char]:
+    """Glyphs of one visual line, left to right. A limit set under or over an operator
+    ("max" with its subscript below) overlaps it sideways: it goes right after the glyphs
+    it is stacked on, as one piece, instead of being shuffled into them."""
+    if len(fragments) == 1:
+        return sorted(fragments[0], key=lambda c: c.x0)
+    sizes = [statistics.median(c.size for c in f) for f in fragments]
+    main = max(sizes)
+    base = [c for f, s in zip(fragments, sizes, strict=True) if s > main * 0.85 for c in f]
+    keyed: list[tuple[tuple[float, int, float], Char]] = []
+    for f, s in zip(fragments, sizes, strict=True):
+        anchor = None
+        if s <= main * 0.85 and base:
+            x0, x1 = min(c.x0 for c in f), max(c.x1 for c in f)
+            y0, y1 = min(c.y0 for c in f), max(c.y1 for c in f)
+            stacked = [
+                c
+                for c in base
+                if x0 <= c.cx <= x1 and min(c.y1, y1) - max(c.y0, y0) < (y1 - y0) * 0.3
+            ]
+            if stacked:
+                anchor = max(c.x1 for c in stacked) - 0.01
+        keyed += [((c.x0, 0, 0.0) if anchor is None else (anchor, 1, c.x0), c) for c in f]
+    keyed.sort(key=lambda t: t[0])
+    return [c for _, c in keyed]
+
+
 def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
     """Fragments of one visual line drawn at different moments of the stream."""
     if len(lines) < 2:
-        return lines
+        return [_order_line([ln]) for ln in lines]
     boxes = [
         [min(c.x0 for c in ln), min(c.y0 for c in ln), max(c.x1 for c in ln), max(c.y1 for c in ln)]
         for ln in lines
     ]
+    sizes = [statistics.median(c.size for c in ln) for ln in lines]
+    # Where the text of each fragment sits, whatever tall glyph (a big operator, a limit)
+    # stretches its box: two lines of a formula-heavy paragraph have overlapping boxes.
+    mids = [statistics.median(c.cy for c in ln) for ln in lines]
     order = sorted(range(len(lines)), key=lambda i: (boxes[i][1], boxes[i][0]))
     merged: list[int] = []
-    out: dict[int, list[Char]] = {}
+    out: dict[int, list[list[Char]]] = {}
     for i in order:
         bi = boxes[i]
         target = None
@@ -604,20 +729,26 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
             h = min(hi, hj)
             overlap = min(bi[3], bj[3]) - max(bi[1], bj[1])
             touching = bi[0] <= bj[2] + h * SPAN_GAP_EM and bj[0] <= bi[2] + h * SPAN_GAP_EM
-            if overlap >= h * 0.7 and touching:
+            level = abs(mids[i] - mids[j]) <= min(sizes[i], sizes[j]) * 0.35
+            if overlap >= h * 0.7 and touching and level:
                 target = j
                 break
-            # A superscript/subscript drawn on its own: smaller, partly overlapping, and
-            # glued to the end (or start) of the bigger fragment.
+            # A superscript/subscript drawn on its own: smaller glyphs (or a short piece),
+            # partly overlapping, glued to the bigger fragment. Two full lines of the same
+            # text, one of them taller because of its own scripts, are not that.
             glued = bi[0] <= bj[2] + h * 0.4 and bj[0] <= bi[2] + h * 0.4
-            if h <= max(hi, hj) * 0.8 and overlap >= h * 0.2 and glued:
+            small = i if hi <= hj else j
+            script = (
+                min(sizes[i], sizes[j]) <= max(sizes[i], sizes[j]) * 0.85 or len(lines[small]) <= 6
+            )
+            if h <= max(hi, hj) * 0.8 and overlap >= h * 0.2 and glued and script:
                 target = j
                 break
         if target is None:
             merged.append(i)
-            out[i] = list(lines[i])
+            out[i] = [lines[i]]
         else:
-            out[target].extend(lines[i])
+            out[target].append(lines[i])
             bj = boxes[target]
             boxes[target] = [
                 min(bj[0], bi[0]),
@@ -625,7 +756,7 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
                 max(bj[2], bi[2]),
                 max(bj[3], bi[3]),
             ]
-    return [out[i] for i in merged]
+    return [_order_line(out[i]) for i in merged]
 
 
 def _is_marker(text: str) -> bool:
@@ -710,14 +841,23 @@ def _split_columns(items: list[Atom], min_gap: float) -> list[list[Atom]] | None
     cols: list[list[Atom]] = []
     rest = items
     gutters = _gutters(items, min_gap)
-    rows = [b for b in _bands(items) if _table_row(b)] if gutters else []
+    rows = [_table_row(b) and b for b in _bands(items)] if gutters else []
     for g0, g1 in gutters:
         left = [a for a in rest if a.x1 <= g0 + 0.01]
         right = [a for a in rest if a.x0 >= g1 - 0.01]
-        cuts_table = any(
-            any(a.x1 <= g0 + 0.01 for a in row) and any(a.x0 >= g1 - 0.01 for a in row)
+        # A table has its rows one after the other. One row of short pieces over the gutter
+        # (an equation beside a short line of the other column) is not a table.
+        across = [
+            bool(row)
+            and any(a.x1 <= g0 + 0.01 for a in row)
+            and any(a.x0 >= g1 - 0.01 for a in row)
             for row in rows
-        )
+        ]
+        run = longest = 0
+        for hit in across:
+            run = run + 1 if hit else 0
+            longest = max(longest, run)
+        cuts_table = longest >= 3 or (bool(across) and all(across))
         if left and right and not cuts_table and _text_like(left) and _text_like(right):
             cols.append(left)
             rest = right
@@ -1343,7 +1483,8 @@ class Line:
 
     @property
     def text(self) -> str:
-        return " ".join(s.text.strip() for s in self.spans if s.text.strip())
+        # (A span that starts with a comma follows an inline icon: "Wu [iD], Fellow".)
+        return " ".join(s.text.strip() for s in self.spans if s.text.strip()).replace(" ,", ",")
 
     @property
     def segments(self) -> list[tuple[str, str]]:
@@ -1436,11 +1577,21 @@ def _right_edges(lines: list[Line]) -> dict[int, float]:
     """Right edge of the text column each line belongs to: the furthest any line reaching
     over it goes. Used to tell a wrapped line from one the author broke on purpose."""
     out = {}
+    # Where columns start: an x that three or more lines begin at.
+    starts = Counter(round(ln.x0 / 2) for ln in lines)
+    col_starts = sorted(k * 2.0 for k, n in starts.items() if n >= 3)
     for a in lines:
+        size = max(a.size, 4)
         edge = a.x1
+        beside = [x for x in col_starts if x >= a.x1 - 1]
         for b in lines:
-            if min(a.x1, b.x1) - max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5:
+            # A centred title over two columns starts well right of a left-column line.
+            if min(a.x1, b.x1) - max(a.x0, b.x0) > (a.x1 - a.x0) * 0.5 and b.x0 <= a.x0 + size * 3:
                 edge = max(edge, b.x1)
+            elif b.x0 >= a.x1 - 1 and min(a.y1, b.y1) - max(a.y0, b.y0) > (a.y1 - a.y0) * 0.5:
+                beside.append(b.x0)  # the next column, on the same row
+        if beside:
+            edge = min(edge, max(a.x1, min(beside) - size))
         out[id(a)] = edge
     return out
 
@@ -1493,21 +1644,25 @@ def _runs(group: list[Line], edges: dict[int, float]) -> list[dict]:
             else:
                 runs[-1][0] += " "
         for k, span in enumerate(ln.spans):
-            if k and runs:
+            if k and runs and not span.text.lstrip().startswith(","):
                 runs[-1][0] += " "
             fonts = span.fonts
             piece: list[Char] = []
+            prior: Char | None = None  # the glyph before this piece, on the same span
             for ch in [*span.chars, None]:
                 fmt = None if ch is None else (fonts[ch.font].bold, fonts[ch.font].italic)
                 if piece and (
                     ch is None or fmt != (fonts[piece[0].font].bold, fonts[piece[0].font].italic)
                 ):
                     f = fonts[piece[0].font]
-                    lead = (
-                        " "
-                        if piece[0].space and runs and not runs[-1][0].endswith((" ", NEWLINE))
-                        else ""
+                    gap = piece[0].x0 - prior.x1 if prior else 0.0
+                    spaced = (piece[0].space or gap > max(span.size, 1) * WORD_GAP_EM) and (
+                        piece[0].c != "," or piece[0].space == 2
                     )
+                    lead = (
+                        " " if spaced and runs and not runs[-1][0].endswith((" ", NEWLINE)) else ""
+                    )
+                    prior = piece[-1]
                     for i, (kind, text) in enumerate(_segments(piece, span.size)):
                         script = None if kind == "n" else ("super" if kind == "sup" else "sub")
                         add((lead if i == 0 else "") + text, f.bold, f.italic, script)
@@ -1552,16 +1707,17 @@ def _tracking(group: list[Line]) -> float | None:
 
 
 def _layout_format(page: Page) -> None:
-    """Alignment, indents and line spacing of each text block, against the page's text area."""
+    """Alignment, indents and line spacing of each text block, against its column."""
     text_blocks = [b for b in page.blocks if b.line_boxes and b.type not in FURNITURE]
     if not text_blocks:
         return
-    left = min(b.bbox[0] for b in text_blocks)
-    right = max(b.bbox[2] for b in text_blocks)
-    width = max(right - left, 1.0)
-    mid = (left + right) / 2
-    tol = max(3.0, width * 0.012)
+    skip = (*FURNITURE, "figure")  # a grid of pictures has gaps that are not gutters
+    cols = columns([b.bbox for b in page.blocks if b.bbox and b.type not in skip])
     for b in text_blocks:
+        left, right = area_of(b.bbox, cols)
+        width = max(right - left, 1.0)
+        mid = (left + right) / 2
+        tol = max(3.0, width * 0.012)
         boxes = b.line_boxes
         x0s = [x0 for x0, _, _, _ in boxes]
         x1s = [x1 for _, _, x1, _ in boxes]
@@ -1589,6 +1745,8 @@ def _layout_format(page: Page) -> None:
             multiple = pitch / (b.pt * 1.15)  # Word's "single" is ~1.15 em for common fonts
             if multiple > 1.2:
                 b.line_spacing = round(multiple, 2)
+            if b.pt * 0.9 <= pitch <= b.pt * 3:
+                b.leading = round(pitch, 1)
 
 
 def _same_leading(gap: float, size: float, group: list[Line], lines: list[Line], idx: int) -> bool:
@@ -1747,7 +1905,8 @@ def analyze_page(pdf: pdfium.PdfDocument, index: int, opts: LayoutOptions) -> Pa
         # and silently falls back to US Letter.)
         crop = page.get_bbox()
         width, height = crop[2] - crop[0], crop[3] - crop[1]
-        chars, rotated, fonts, map_errors = read_chars(page, crop)
+        producer = pdf.get_metadata_value("Producer") or ""
+        chars, rotated, fonts, map_errors = read_chars(page, crop, is_tex_producer(producer))
         g = read_graphics(page, crop, width, height)
         if any(f.white for f in fonts):
             chars, rotated = _visible(page, chars + rotated, fonts, g, width, height, rotated)
@@ -1932,7 +2091,7 @@ def _furniture_key(b: Block) -> str:
     if b.type == "figure":  # a logo repeated on every page: same place, same size
         x0, y0, x1, y1 = b.bbox
         return f"fig:{round(x0 / 6)},{round(y0 / 6)},{round((x1 - x0) / 6)},{round((y1 - y0) / 6)}"
-    return _signature(b.text)
+    return re.sub(r"^(# )+|( #)+$", "", _signature(b.text))  # "8836 IEEE TRANS…" = "IEEE TRANS…"
 
 
 def _mark_furniture(pages: list[Page]) -> None:
@@ -1955,7 +2114,7 @@ def _mark_furniture(pages: list[Page]) -> None:
     counts: Counter = Counter()
     for p in pages:
         counts.update({(zone(b, p), _furniture_key(b)) for b in p.blocks if zone(b, p)})
-    need = max(2, math.ceil(len(pages) * 0.5))
+    need = max(2, math.ceil(len(pages) * 0.3))  # running heads alternate on odd/even pages
     for p in pages:
         for b in p.blocks:
             z = zone(b, p)
@@ -1976,7 +2135,12 @@ def _mark_furniture(pages: list[Page]) -> None:
 
 def _section_number(b: Block, body: float) -> bool:
     """A one-line 'list item' set bold or bigger than the body text is a numbered heading."""
-    if b.lines != 1 or not b.marker or not b.marker[0].isdigit() or len(b.text) > 80:
+    if b.lines != 1 or not b.marker or len(b.text) > 80:
+        return False
+    if re.fullmatch(r"[IVX]{1,4}\.", b.marker):  # "I. INTRODUCTION" in small caps
+        letters = [c for c in b.text if c.isalpha()]
+        return len(letters) >= 4 and all(c.isupper() for c in letters)
+    if not b.marker[0].isdigit():
         return False
     return (b.font_size or body) >= body * 1.25 or (b.bold and not b.text.rstrip().endswith("."))
 
