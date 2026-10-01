@@ -166,3 +166,13 @@ def test_fast_mode(client, sample_pdf):
     body = post(client, sample_pdf, mode="fast").json()
     assert body["page_count"] == 5 and "Constituição" in body["text"]
     assert "schema" not in body
+
+
+def test_math_as_latex(client, tmp_path):
+    from fixtures import exam_pdf
+
+    pdf = exam_pdf(tmp_path / "exam.pdf")
+    assert "$x^{2} + y^{2} = 4$" in post(client, pdf, format="text", math="latex").text
+    assert "$x^{2} + y^{2} = 4$" in post(client, pdf, format="markdown", math="latex").text
+    assert "x² + y² = 4" in post(client, pdf, format="text").text
+    assert post(client, pdf, format="text", math="tex").status_code == 422
