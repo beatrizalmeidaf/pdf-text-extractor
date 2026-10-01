@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf-text-api"
+version = "3.0.0"
+description = "PDF to Markdown, JSON and tables: structured PDF extraction (reading order, tables, formulas, images, bounding boxes) on Apache Tika. Python library, CLI, REST API and browser app."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Beatriz Almeida" }]
+requires-python = ">=3.10"
+keywords = [
+  "pdf", "pdf-to-markdown", "pdf-to-json", "pdf-to-text", "pdf-parser", "pdf-extraction",
+  "table-extraction", "pdf-tables", "layout-analysis", "reading-order", "document-parsing",
+  "formula-extraction", "latex", "ocr", "apache-tika", "tika", "pdfium", "rag", "llm",
+  "markdown", "fastapi", "docx", "pptx",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Natural Language :: Portuguese (Brazilian)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Text Processing",
+  "Topic :: Text Processing :: Markup :: Markdown",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "tika>=2.6.0",        # Tika Server jar download/version pinning
+  "requests>=2.31",     # keep-alive client for Tika Server
+  "pypdfium2>=4.30",    # layout engine (geometry, rendering)
+  "pillow>=10",         # PNG crops of figures, tables and formulas
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9"]
+dev = ["pdf-text-api[api]", "pytest>=8", "httpx>=0.27", "fpdf2>=2.7", "ruff>=0.5"]
+
+[project.scripts]
+pdf-text-api = "pdf_text_api.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/beatrizalmeidaf/pdf-text-extractor"
+Issues = "https://github.com/beatrizalmeidaf/pdf-text-extractor/issues"
+Documentation = "https://github.com/beatrizalmeidaf/pdf-text-extractor#readme"
+"Web app" = "https://beatrizalmeidaf.github.io/pdf-text-extractor/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf_text_api"]
+
+# The browser app (also served by `pdf-text-api serve` at /) ships inside the package.
+[tool.hatch.build.targets.wheel.force-include]
+"web" = "pdf_text_api/web"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "web", "tests", "README.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["benchmarks"]  # standalone scripts, not part of the package
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]  # FastAPI's File()/Query() defaults
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
