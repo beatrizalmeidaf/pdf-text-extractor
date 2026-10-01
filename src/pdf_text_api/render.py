@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
+from .columns import bands
 from .model import FURNITURE, Block
 
 if TYPE_CHECKING:
@@ -203,6 +204,8 @@ figure{margin:1rem 0}figure img{max-width:100%}figcaption{color:#656d76;font-siz
 .formula{overflow-x:auto;padding:.5rem 1rem;background:#f6f8fa;border-radius:6px;
 font-family:ui-monospace,monospace}
 pre{background:#f6f8fa;padding:1rem;border-radius:6px;overflow-x:auto}
+.cols{display:grid;column-gap:1.75rem;align-items:start}.cols>div{min-width:0}
+@media(max-width:640px){.cols{display:block}}
 """
 
 
@@ -211,7 +214,8 @@ def _attrs(b: Block) -> str:
     return f' id="{b.id}" data-type="{b.type}" data-bbox="{bbox}"'
 
 
-def block_html(b: Block, images: ImageMode = "embed") -> str:
+def block_html(b: Block, images: ImageMode = "embed", own_caption: bool = True) -> str:
+    """`own_caption`: False when the caption is also a block of its own on the page."""
     e = html.escape
     a = _attrs(b)
     if b.type == "heading":
@@ -225,7 +229,7 @@ def block_html(b: Block, images: ImageMode = "embed") -> str:
         body = "".join(
             "<tr>" + "".join(f"<td>{e(c)}</td>" for c in r) + "</tr>" for r in b.rows[1:]
         )
-        cap = f"<caption>{e(b.caption)}</caption>" if b.caption else ""
+        cap = f"<caption>{e(b.caption)}</caption>" if b.caption and own_caption else ""
         return f"<table{a}>{cap}<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
     if b.type == "formula":
         num = f" <span>{e(b.number)}</span>" if b.number else ""
@@ -239,7 +243,7 @@ def block_html(b: Block, images: ImageMode = "embed") -> str:
             else:
                 src = f"images/{b.image.name}"
         img = f'<img src="{src}" alt="{e(b.caption or "figura")}">' if src else ""
-        cap = f"<figcaption>{e(b.caption)}</figcaption>" if b.caption else ""
+        cap = f"<figcaption>{e(b.caption)}</figcaption>" if b.caption and own_caption else ""
         return f"<figure{a}>{img}{cap}</figure>"
     if b.type == "caption":
         return f"<p{a}{html_style(b)}><em>{html_inline(b)}</em></p>"
@@ -263,7 +267,22 @@ def to_html(doc: Document, *, images: ImageMode = "embed", title: str | None = N
             f'data-width="{page.width:.1f}" data-height="{page.height:.1f}">'
             f'<h6 class="page-label">Página {page.number}</h6>'
         )
-        parts += [block_html(b, images) for b in page.blocks if b.type not in FURNITURE]
+        blocks = [b for b in page.blocks if b.type not in FURNITURE]
+        captions = {b.text for b in blocks if b.type == "caption"}
+        # Two columns on the page stay two columns: each multi-column band is a grid.
+        for band in bands(blocks):
+            cols = [
+                [block_html(b, images, b.caption not in captions) for b in c]
+                for c in band["blocks"]
+            ]
+            if len(cols) == 1:
+                parts += cols[0]
+                continue
+            tracks = " ".join(f"{max(1, round(x1 - x0))}fr" for x0, x1 in band["columns"])
+            parts.append(f'<div class="cols" style="grid-template-columns:{tracks}">')
+            for col in cols:
+                parts += ["<div>", *col, "</div>"]
+            parts.append("</div>")
         parts.append("</section>")
     parts.append("</body></html>")
     return "\n".join(parts)
