@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Parity check: the browser engine (web/assets/engine.js) must match the Python one.",
+  "dependencies": { "pdfjs-dist": "4.10.38" },
+  "scripts": { "test": "node parity.mjs" }
+}
