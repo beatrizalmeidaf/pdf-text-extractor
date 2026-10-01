@@ -18,6 +18,6 @@ for name, build in (
     pdf = build(out / f"{name}.pdf")
     doc = extract(pdf, tika=False)
     (out / f"{name}.json").write_text(
-        json.dumps(doc.to_dict(embed_images=False), ensure_ascii=False)
+        json.dumps(doc.to_dict(embed_images=False), ensure_ascii=False), encoding="utf-8"
     )
 print(f"fixtures + expected JSON in {out}")
