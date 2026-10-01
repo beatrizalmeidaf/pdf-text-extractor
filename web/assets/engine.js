@@ -2094,7 +2094,7 @@ function composeFigures(page, body) {
 }
 
 // "Table 1 presents the results…" is a sentence; "Table 1: Results" and "Table 1 Results" are captions.
-function captionText(t) {
+export function captionText(t) {
   const m = CAPTION.exec(t);
   if (!m) return false;
   if (/[.:\-–—|]$/.test(m[0].trimEnd())) return true;
