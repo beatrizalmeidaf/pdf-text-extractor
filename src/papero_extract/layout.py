@@ -16,11 +16,11 @@ of pdf.js; thresholds are named alike in both files.
 
 from __future__ import annotations
 
+import bisect
 import ctypes
 import io
 import math
 import re
-import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -97,6 +97,13 @@ class LayoutOptions:
     detect_formulas: bool = True
 
 
+def _median(values) -> float:
+    """`statistics.median`, minus its overhead: it runs for every line of every page."""
+    data = sorted(values)
+    mid = len(data) // 2
+    return data[mid] if len(data) % 2 else (data[mid - 1] + data[mid]) / 2
+
+
 # ============================================================================= primitives
 @dataclass(slots=True)
 class FontInfo:
@@ -154,20 +161,28 @@ class Span:
         self.y0 = min(c.y0 for c in cs)
         self.y1 = max(c.y1 for c in cs)
         self.size = _mode_size(cs)
-        fonts = [self.fonts[c.font] for c in cs]
-        n = len(fonts)
-        self.bold = sum(f.bold for f in fonts) > n * 0.6
-        self.italic = sum(f.italic for f in fonts) > n * 0.6
-        self.mono = sum(f.mono for f in fonts) > n * 0.8
-        self.math = sum(f.math for f in fonts) / n
-        if all(f.rotated for f in fonts):
+        used = {c.font for c in cs}
+        if len(used) == 1:  # one font, the usual case
+            font = self.fonts[cs[0].font]
+            self.bold, self.italic, self.mono = font.bold, font.italic, font.mono
+            self.math = float(font.math)
+            rotated = font.rotated
+        else:
+            fonts = [self.fonts[c.font] for c in cs]
+            n = len(fonts)
+            self.bold = sum(f.bold for f in fonts) > n * 0.6
+            self.italic = sum(f.italic for f in fonts) > n * 0.6
+            self.mono = sum(f.mono for f in fonts) > n * 0.8
+            self.math = sum(f.math for f in fonts) / n
+            rotated = all(self.fonts[i].rotated for i in used)
+        if rotated:
             # Rotated text (side stamps, axis titles): keep stream order, no baseline logic.
             text = "".join((" " if c.space and i else "") + c.c for i, c in enumerate(cs))
             self.segments = [("n", text)]
         else:
             self.segments = _segments(cs, self.size)
 
-    @property
+    @cached_property
     def text(self) -> str:
         return segments_text(self.segments)
 
@@ -193,18 +208,22 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
     """Text of one line, with superscript / subscript runs marked by baseline shift."""
     # The text size: the biggest one a fair share of the glyphs have. (In "MnO2(s) + CO2(g)"
     # the indices outnumber the letters.)
-    tally = Counter(round(c.size * 2) / 2 for c in chars)
-    shared = [s for s, n in tally.items() if n >= max(2, len(chars) * 0.2)]
+    sizes = [round(c.size * 2) / 2 for c in chars]
+    if min(sizes) == max(sizes):  # one size, the usual case
+        shared = sizes[:1] if len(chars) >= 2 else []
+    else:
+        tally = Counter(sizes)
+        shared = [s for s, n in tally.items() if n >= max(2, len(chars) * 0.2)]
     main = max([main, *shared])
     normal = [c.y1 for c in chars if abs(c.size - main) <= main * 0.05] or [c.y1 for c in chars]
-    base = statistics.median(normal)
+    base = _median(normal)
     # Letter-spaced text ("T Í T U L O") has wide gaps between every glyph: a word gap
     # must be wide *relative to the usual gap of this run*, not just in absolute terms.
     gaps = [b.x0 - a.x1 for a, b in zip(chars, chars[1:], strict=False) if b.space < 2]
-    tracking = max(0.0, statistics.median(gaps)) if len(gaps) >= 3 else 0.0
+    tracking = max(0.0, _median(gaps)) if len(gaps) >= 3 else 0.0
     word_gap = tracking + max(main, 1) * WORD_GAP_EM
     kinds = []
-    for ch in chars:
+    for ch in chars if min(c.size for c in chars) < main * 0.96 else ():
         kind = "n"
         if ch.size < main * 0.86:
             if base - ch.y1 > main * 0.2:
@@ -217,8 +236,10 @@ def _segments(chars: list[Char], main: float) -> list[tuple[str, str]]:
             elif ch.y1 - base > main * 0.15:
                 kind = "sub"
         kinds.append(kind)
+    if not kinds:
+        kinds = ["n"] * len(chars)
     # A glyph of another font inside an index ("(ℓ)" with a script l) follows its neighbours.
-    for k in range(1, len(chars) - 1):
+    for k in range(1, len(chars) - 1) if "sup" in kinds or "sub" in kinds else ():
         off_line = abs(chars[k].y1 - base) > main * 0.08  # ("O" in "H2O2" stays on the line)
         if kinds[k] == "n" and off_line and kinds[k - 1] == kinds[k + 1] != "n":
             tight = max(chars[k].x0 - chars[k - 1].x1, chars[k + 1].x0 - chars[k].x1) <= main * 0.2
@@ -284,7 +305,7 @@ def _typeset_math(chars: list[Char], g: Graphics) -> list[Char]:
         """Glyphs on the same row right beside the rule: the row is a line of text, and the
         rule an underline or a table border."""
         members = set(idx)
-        cy = statistics.median(chars[i].cy for i in idx)
+        cy = _median(chars[i].cy for i in idx)
         return any(
             i not in members
             and abs(c.cy - cy) < size * 0.25
@@ -293,11 +314,15 @@ def _typeset_math(chars: list[Char], g: Graphics) -> list[Char]:
             for i, c in enumerate(chars)
         )
 
+    by_x = sorted(range(len(chars)), key=lambda i: chars[i].cx)
+    centres = [chars[i].cx for i in by_x]
     for y, x0, x1 in rules:
         num: list[int] = []
         den: list[int] = []
-        for i, c in enumerate(chars):
-            if i in gone or i in put or not x0 - 1 <= c.cx <= x1 + 1:
+        under = by_x[bisect.bisect_left(centres, x0 - 1) : bisect.bisect_right(centres, x1 + 1)]
+        for i in sorted(under):
+            c = chars[i]
+            if i in gone or i in put:
                 continue
             if abs(c.y1 - y) <= c.size * 0.3 and c.cy < y:
                 num.append(i)
@@ -305,7 +330,7 @@ def _typeset_math(chars: list[Char], g: Graphics) -> list[Char]:
                 den.append(i)
         if not den or len(num) > 40 or len(den) > 40:
             continue
-        size = statistics.median(chars[i].size for i in num + den)
+        size = _median(chars[i].size for i in num + den)
         width = max(
             max(chars[i].x1 for i in part) - min(chars[i].x0 for i in part)
             for part in (num, den)
@@ -767,7 +792,7 @@ def _drop_caps(chars: list[Char]) -> list[Char]:
     beside it into one. Put it on its first line, right before the word it starts."""
     if len(chars) < 20:
         return chars
-    typical = statistics.median(c.size for c in chars)
+    typical = _median(c.size for c in chars)
     out = chars
     for i, c in enumerate(chars[:-1]):
         if c.size < typical * 2.2 or not c.c.isalpha():
@@ -817,7 +842,7 @@ def build_spans(
     # joins two columns (an equation number drawn right before the next column's line).
     runs = []
     for line in raw_lines:
-        size = max(statistics.median(c.size for c in line), 4)
+        size = max(_median(c.size for c in line), 4)
         start = 0
         for i in range(1, len(line) + 1):
             if i < len(line) and line[i].x0 - line[i - 1].x1 <= size * 0.5:
@@ -830,15 +855,16 @@ def build_spans(
     gaps = page_gutters(runs)
     if gutters_out is not None:
         gutters_out.extend(gaps)
+    narrowest = min((g1 - g0 for g0, g1 in gaps), default=math.inf) - 5.0
     spans: list[Span] = []
     for line in raw_lines:
         line = _compose_accents(line)
-        size = max(statistics.median(c.size for c in line), 4)
+        size = max(_median(c.size for c in line), 4)
         # Justified lines stretch every word gap by about the same amount, so a gap only
         # separates columns/cells when it is much wider than this line's usual word gap.
         pairs = list(zip(line, line[1:], strict=False))
         word_gaps = [b.x0 - a.x1 for a, b in pairs if b.space or b.x0 - a.x1 > size * WORD_GAP_EM]
-        typical = statistics.median(word_gaps) if len(word_gaps) >= 3 else 0.0
+        typical = _median(word_gaps) if len(word_gaps) >= 3 else 0.0
         # The line sets its word gaps with real space glyphs: a gap this wide without one is
         # a jump of the pen — an equation number followed by the next column's line.
         spaced = sum(c.space == 2 for c in line) >= 3
@@ -852,7 +878,10 @@ def build_spans(
                 wide = False  # a real space char means "same text run"
             if spaced and ch.space != 2 and gap > size * SPAN_GAP_EM:
                 wide = True
-            if any(prev.x1 <= g0 + 2.5 and ch.x0 >= g1 - 2.5 for g0, g1 in gaps):
+            # (Only a gap as wide as the narrowest gutter can span one.)
+            if gap >= narrowest and any(
+                prev.x1 <= g0 + 2.5 and ch.x0 >= g1 - 2.5 for g0, g1 in gaps
+            ):
                 wide = True
             if wide:
                 spans.append(Span(piece, fonts))
@@ -908,7 +937,7 @@ def _order_line(fragments: list[list[Char]]) -> list[Char]:
     it is stacked on, as one piece, instead of being shuffled into them."""
     if len(fragments) == 1:
         return sorted(fragments[0], key=lambda c: c.x0)
-    sizes = [statistics.median(c.size for c in f) for f in fragments]
+    sizes = [_median(c.size for c in f) for f in fragments]
     main = max(sizes)
     base = [c for f, s in zip(fragments, sizes, strict=True) if s > main * 0.85 for c in f]
     keyed: list[tuple[tuple[float, int, float], Char]] = []
@@ -937,10 +966,10 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
         [min(c.x0 for c in ln), min(c.y0 for c in ln), max(c.x1 for c in ln), max(c.y1 for c in ln)]
         for ln in lines
     ]
-    sizes = [statistics.median(c.size for c in ln) for ln in lines]
+    sizes = [_median(c.size for c in ln) for ln in lines]
     # Where the text of each fragment sits, whatever tall glyph (a big operator, a limit)
     # stretches its box: two lines of a formula-heavy paragraph have overlapping boxes.
-    mids = [statistics.median(c.cy for c in ln) for ln in lines]
+    mids = [_median(c.cy for c in ln) for ln in lines]
     # A merged line is measured by its main fragment (the text), not by the exponent that
     # happened to be drawn first.
     counts = [len(ln) for ln in lines]
@@ -956,7 +985,7 @@ def _merge_fragments(lines: list[list[Char]]) -> list[list[Char]]:
     # ones, so that an exponent finds the letter it belongs to already in place.)
     everything = range(len(lines))
     order = sorted((i for i in everything if counts[i] > 6), key=by_place)
-    typical = statistics.median(sizes[i] for i in order) if order else statistics.median(sizes)
+    typical = _median(sizes[i] for i in order) if order else _median(sizes)
     plain = {i for i in everything if counts[i] <= 6 and sizes[i] >= typical * 0.95}
     order += sorted(plain, key=by_place)
     order += sorted((i for i in everything if counts[i] <= 6 and i not in plain), key=by_place)
@@ -1132,7 +1161,7 @@ def _text_like(side: list[Atom]) -> bool:
     if any(a.kind != "span" for a in side):
         return True
     lengths = [len(a.span.text) for a in side if a.span]
-    return bool(lengths) and statistics.median(lengths) >= TEXT_LIKE_CHARS
+    return bool(lengths) and _median(lengths) >= TEXT_LIKE_CHARS
 
 
 def _split_columns(items: list[Atom], min_gap: float, page_gaps=()) -> list[list[Atom]] | None:
@@ -1322,7 +1351,7 @@ def _chars_text(chars: list[Char]) -> str:
     lines: list[list[Char]] = [[chars[0]]]
     for ch in chars[1:]:
         last = lines[-1]
-        ref = statistics.median(c.cy for c in last)
+        ref = _median(c.cy for c in last)
         if abs(ch.cy - ref) <= max(ch.size, last[0].size) * 0.45:
             last.append(ch)
         else:
@@ -1355,7 +1384,7 @@ class Word:
 
     @property
     def cy(self) -> float:
-        return statistics.median(c.cy for c in self.chars)
+        return _median(c.cy for c in self.chars)
 
 
 def words_of(span: Span) -> list[Word]:
@@ -1382,10 +1411,10 @@ def _projection_columns(spans: list[Span], x0: float, x1: float) -> list[float]:
     atoms = [Atom("span", s.x0, s.y0, s.x1, s.y1, span=s) for s in spans]
     bands = [[w for a in band for w in words_of(a.span)] for band in _bands(atoms)]
     counts = [len(b) for b in bands]
-    typical = statistics.median(counts)
+    typical = _median(counts)
     body = [b for b, n in zip(bands, counts, strict=True) if n >= typical * 0.5 and n >= 2]
     words = [w for b in (body if len(body) >= 2 else bands) for w in b]
-    size = statistics.median(s.size for s in spans)
+    size = _median(s.size for s in spans)
     min_gap = max(3.0, size * 0.55)
     ivs = sorted((w.x0, w.x1) for w in words)
     bounds = [x0]
@@ -1462,7 +1491,7 @@ def _logical_rows(spans: list[Span], ys: list[float], xs: list[float]) -> list[f
         tops = [min(t.y0 for t in band) for band in bands]
         bottoms = [max(t.y1 for t in band) for band in bands]
         gaps = [tops[k + 1] - bottoms[k] for k in range(len(bands) - 1)]
-        h = statistics.median(bt - tp for tp, bt in zip(tops, bottoms, strict=True))
+        h = _median(bt - tp for tp, bt in zip(tops, bottoms, strict=True))
         threshold = min(gaps) + max(1.5, h * 0.3)
         bimodal = len(gaps) >= 2 and max(gaps) > threshold
         cols = [len({_bucket((t.x0 + t.x1) / 2, xs) for t in band}) for band in bands]
@@ -1563,7 +1592,7 @@ def unruled_table(bands: list[list[Atom]], start: int, body: float) -> tuple[Blo
         return None, start
     lengths = [len(s.text) for s in spans]
     words = [len(s.text.split()) for s in spans]
-    if statistics.median(lengths) > 38 or (ncols <= 3 and statistics.median(words) >= 6):
+    if _median(lengths) > 38 or (ncols <= 3 and _median(words) >= 6):
         return None, start  # prose in columns, not a table
     # Row edges between multi-cell bands; a single-span band continues the row above.
     rows_edges = [min(a.y0 for a in run[0])]
@@ -1791,7 +1820,7 @@ class Line:
         self.x1 = max(s.x1 for s in self.spans)
         self.y1 = max(s.y1 for s in self.spans)
 
-    @property
+    @cached_property
     def text(self) -> str:
         # (A span that starts with a comma follows an inline icon: "Wu [iD], Fellow".)
         return " ".join(s.text.strip() for s in self.spans if s.text.strip()).replace(" ,", ",")
@@ -2068,8 +2097,8 @@ def _tracking(group: list[Line]) -> float | None:
                     gaps.append(b.x0 - a.x1)
     if len(gaps) < 4:
         return None
-    gap = statistics.median(gaps)
-    size = statistics.median(ln.size for ln in group)
+    gap = _median(gaps)
+    size = _median(ln.size for ln in group)
     return round(gap, 1) if gap > size * 0.08 else None
 
 
@@ -2108,7 +2137,7 @@ def _layout_format(page: Page) -> None:
             if len(boxes) > 1 and abs(x0s[0] - base) > tol:
                 b.first_line = round(x0s[0] - base, 1)
         if len(boxes) >= 2 and b.pt:
-            pitch = statistics.median(boxes[k + 1][3] - boxes[k][3] for k in range(len(boxes) - 1))
+            pitch = _median(boxes[k + 1][3] - boxes[k][3] for k in range(len(boxes) - 1))
             multiple = pitch / (b.pt * 1.15)  # Word's "single" is ~1.15 em for common fonts
             if multiple > 1.2:
                 b.line_spacing = round(multiple, 2)
@@ -2133,6 +2162,17 @@ def _same_leading(gap: float, size: float, group: list[Line], lines: list[Line],
     return any(g is not None and abs(g - gap) <= max(1.5, gap * 0.2) for g in near)
 
 
+def _fonts_used(group: list[Line]) -> list[tuple[FontInfo, int]]:
+    """Each font of these lines with how many glyphs it sets, in order of first use."""
+    counts: dict[int, list] = {}
+    for ln in group:
+        for s in ln.spans:
+            for i, n in Counter(c.font for c in s.chars).items():
+                entry = counts.setdefault(id(s.fonts[i]), [s.fonts[i], 0])
+                entry[1] += n
+    return [(f, n) for f, n in counts.values()]
+
+
 def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
     blocks: list[Block] = []
     group: list[Line] = []
@@ -2147,7 +2187,7 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
         y0 = min(ln.y0 for ln in group)
         x1 = max(ln.x1 for ln in group)
         y1 = max(ln.y1 for ln in group)
-        size = statistics.median(ln.size for ln in group)
+        size = _median(ln.size for ln in group)
         bold = all(ln.bold for ln in group)
         if kind == "code":
             text = "\n".join(_indent(ln, x0, size) + ln.text for ln in group)
@@ -2173,12 +2213,7 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
             text = _join_lines(group, edges)
             b = Block(kind, (x0, y0, x1, y1), text=text)
             # Runs only where formatting varies (or isn't plain): most paragraphs are neither.
-            looks = {
-                (s.fonts[c.font].bold, s.fonts[c.font].italic)
-                for ln in group
-                for s in ln.spans
-                for c in s.chars
-            }
+            looks = {(f.bold, f.italic) for f, _ in _fonts_used(group)}
             plain = looks == {(False, False)} and not any(ln.has_scripts for ln in group)
             runs = [] if plain else _runs(group, edges)
             if kind == "list_item":
@@ -2192,12 +2227,15 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
             ):
                 b.runs = runs
             b.line_boxes = [(ln.x0, ln.y0, ln.x1, ln.y1) for ln in group]
-        glyph_fonts = [s.fonts[c.font] for ln in group for s in ln.spans for c in s.chars]
-        pts = [f.pt for f in glyph_fonts if f.pt]
+        glyph_fonts = _fonts_used(group)
+        pts = [f.pt for f, n in glyph_fonts if f.pt for _ in range(n)]
         if pts:
-            b.pt = round(statistics.median(pts), 1)
+            b.pt = round(_median(pts), 1)
         b.tracking = _tracking(group)
-        families = Counter(f.name for f in glyph_fonts if f.name)
+        families: Counter = Counter()
+        for f, n in glyph_fonts:
+            if f.name:
+                families[f.name] += n
         if families:
             b.font = _family(families.most_common(1)[0][0])
         b.font_size, b.bold, b.lines = size, bold, len(group)
@@ -2240,7 +2278,8 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
                 # flush with the marker — the latter only right after a full-width line.
                 first = group[0]
                 indent_ok = ln.x0 >= first.x0 + size * 0.3
-                wrapped = ln.x0 >= first.x0 - 2 and prev.x1 >= max(g.x1 for g in group) - size * 2
+                edge = edges.get(id(prev), max(g.x1 for g in group))
+                wrapped = ln.x0 >= first.x0 - 2 and prev.x1 >= edge - size * 2
                 # (A first line cut short on purpose is a heading line, not an item.)
                 continues = (
                     continues

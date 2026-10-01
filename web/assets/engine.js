@@ -1376,7 +1376,8 @@ function linesToBlocks(lines) {
       else if (["list_item", "formula", "code"].includes(thisKind)) cont = false;
       else if (kind === "list_item") {
         // Wrapped item text: indented under the text, or flush with the marker right after a full line.
-        const wrapped = ln.x0 >= group[0].x0 - 2 && prev.x1 >= Math.max(...group.map((g) => g.x1)) - size * 2;
+        const edge = edges.get(prev) ?? Math.max(...group.map((g) => g.x1));
+        const wrapped = ln.x0 >= group[0].x0 - 2 && prev.x1 >= edge - size * 2;
         // ("A. Related Work" in italics, then its paragraph in upright type: two blocks.)
         cont = cont && (ln.x0 >= group[0].x0 + size * 0.3 || wrapped) && !hardBreak(prev, ln, edges) && !(group[0].italic && !ln.italic);
       }
