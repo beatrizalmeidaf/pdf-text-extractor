@@ -13,14 +13,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml"><img src="https://github.com/beatrizalmeidaf/pdf-text-extractor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/beatrizalmeidaf/papero-pdf-text-extractor/actions/workflows/ci.yml"><img src="https://github.com/beatrizalmeidaf/papero-pdf-text-extractor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="web/assets/badges/python.svg" alt="Python 3.10–3.13">
   <a href="LICENSE"><img src="web/assets/badges/license.svg" alt="MIT license"></a>
   <img src="web/assets/badges/ml-models.svg" alt="No ML models">
 </p>
 
 <p align="center">
-  <a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/"><b>▶ Try it in your browser</b></a>
+  <a href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/"><b>▶ Try it in your browser</b></a>
   &nbsp;·&nbsp;
   <a href="#quick-start"><b>Quick start</b></a>
   &nbsp;·&nbsp;
@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <a href="https://beatrizalmeidaf.github.io/pdf-text-extractor/">
+  <a href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/">
     <img src="web/assets/screenshot.png" alt="papero in the browser: every block of the page outlined by type, the selected table shown as rows and columns with its cropped image" width="900">
   </a>
   <br>
@@ -87,7 +87,7 @@ doc = extract("paper.pdf")
 print(doc.to_markdown())
 ```
 
-Or skip the install: **[open the browser app](https://beatrizalmeidaf.github.io/pdf-text-extractor/)**, drop a PDF, export to the format you need.
+Or skip the install: **[open the browser app](https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/)**, drop a PDF, export to the format you need.
 
 <details>
 <summary><b>More Python</b> — tables, formulas, positions, images, options</summary>
@@ -256,7 +256,7 @@ The browser app runs the same algorithm ported to JavaScript on pdf.js, and CI c
 <summary><b>Development</b></summary>
 
 ```bash
-git clone https://github.com/beatrizalmeidaf/pdf-text-extractor.git && cd pdf-text-extractor
+git clone https://github.com/beatrizalmeidaf/papero-pdf-text-extractor.git && cd pdf-text-extractor
 pip install -e ".[dev]"
 pytest -q                                   # includes real-world regressions
 ruff check src tests && ruff format --check src tests

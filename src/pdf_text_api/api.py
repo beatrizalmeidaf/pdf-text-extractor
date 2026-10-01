@@ -61,8 +61,8 @@ from .tika_client import TikaUnavailableError, get_client
 
 log = logging.getLogger("pdf_text_api")
 
-REPO_URL = "https://github.com/beatrizalmeidaf/pdf-text-extractor"
-PAGES_URL = "https://beatrizalmeidaf.github.io/pdf-text-extractor/"
+REPO_URL = "https://github.com/beatrizalmeidaf/papero-pdf-text-extractor"
+PAGES_URL = "https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/"
 
 MEDIA = {
     "json": "application/json",

@@ -48,10 +48,10 @@ dev = ["pdf-text-api[api]", "pytest>=8", "httpx>=0.27", "fpdf2>=2.7", "ruff>=0.5
 pdf-text-api = "pdf_text_api.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/beatrizalmeidaf/pdf-text-extractor"
-Issues = "https://github.com/beatrizalmeidaf/pdf-text-extractor/issues"
-Documentation = "https://github.com/beatrizalmeidaf/pdf-text-extractor#readme"
-"Web app" = "https://beatrizalmeidaf.github.io/pdf-text-extractor/"
+Homepage = "https://github.com/beatrizalmeidaf/papero-pdf-text-extractor"
+Issues = "https://github.com/beatrizalmeidaf/papero-pdf-text-extractor/issues"
+Documentation = "https://github.com/beatrizalmeidaf/papero-pdf-text-extractor#readme"
+"Web app" = "https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdf_text_api"]

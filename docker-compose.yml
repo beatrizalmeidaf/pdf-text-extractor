@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    # image: ghcr.io/beatrizalmeidaf/pdf-text-extractor:latest
+    # image: ghcr.io/beatrizalmeidaf/papero-pdf-text-extractor:latest
     ports:
       - "8000:8000"
     env_file:
