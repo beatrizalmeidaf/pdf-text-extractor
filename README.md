@@ -173,6 +173,8 @@ The report checks every document against its own PDF — no ground truth, so rea
 | `figures` | every "Figure N" caption has its figure |
 | `formulas` | each formula has LaTeX and no unmapped glyph |
 
+The browser app runs the same checks on the PDF you drop: the fidelity figure sits next to the page count, and the **Compare** tab puts each page beside what was extracted from it (side by side or overlaid), marking the PDF text that is not in the output and the blocks that failed a check.
+
 ```python
 from papero_extract import extract
 from papero_extract.batch import run_batch
