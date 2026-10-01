@@ -29,10 +29,10 @@
 
 <p align="center">
   <a href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/">
-    <img src="web/assets/screenshot.png" alt="papero in the browser: every block of the page outlined by type, the selected table shown as rows and columns with its cropped image" width="900">
+    <img src="web/assets/demo.gif" alt="papero demo: load a PDF, every block outlined on the page, click a table to inspect it, see tables and LaTeX formulas, export to Word" width="900">
   </a>
   <br>
-  <sub>The browser app: each block outlined where it sits on the page — click one to see its type, position and content. Your PDF never leaves your machine.</sub>
+  <sub>30 seconds in the browser app: load a PDF, inspect any block, check tables and formulas, export to Word. Your PDF never leaves your machine. (<a href="web/assets/demo.mp4">MP4</a>)</sub>
 </p>
 
 ---
