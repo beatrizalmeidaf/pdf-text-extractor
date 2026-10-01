@@ -35,6 +35,22 @@ const view = (doc) =>
     }));
 
 let failures = 0;
+
+// The inline-math writer (web/assets/mathtext.js against mathtext.py), sample by sample, and
+// the Markdown and text it gives for each fixture.
+const local = (f) => import(pathToFileURL(join(here, "../../web/assets", f)).href);
+const { inlineLatex } = await local("mathtext.js");
+const { toMarkdown, toText } = await local("export.js");
+const same = (label, py, js) => {
+  if (py === js) return true;
+  failures++;
+  console.error(`✗ ${label}\n  python: ${JSON.stringify(py)}\n  js:     ${JSON.stringify(js)}`);
+  return false;
+};
+const samples = Object.entries(JSON.parse(readFileSync(join(dir, "inline_math.json"), "utf8")));
+if (samples.map(([text, py]) => same(`inline math: ${text}`, py, inlineLatex(text))).every(Boolean)) {
+  console.log(`✓ inline math: ${samples.length} samples`);
+}
 for (const name of ["structured", "hard", "declaration", "exam"]) {
   const data = readFileSync(join(dir, `${name}.pdf`));
   const { doc, pdf } = await extractDocument(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
@@ -55,6 +71,10 @@ for (const name of ["structured", "hard", "declaration", "exam"]) {
   python: ${pyFid}
   js:     ${jsFid}`);
   } else console.log(`✓ ${name} fidelity: ${JSON.parse(jsFid).status}`);
+  const pyDoc = JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8"));
+  const md = same(`${name} markdown, math as LaTeX`, readFileSync(join(dir, `${name}.latex.md`), "utf8"), toMarkdown(pyDoc, { images: "none", math: "latex" }));
+  const txt = same(`${name} text, math as LaTeX`, readFileSync(join(dir, `${name}.latex.txt`), "utf8"), toText(pyDoc, { math: "latex" }));
+  if (md && txt) console.log(`✓ ${name} markdown and text with LaTeX math`);
   if (name === "structured") {
     // Take a paragraph out: the report must say so, and say where on the page it was.
     const first = doc.pages[0];
