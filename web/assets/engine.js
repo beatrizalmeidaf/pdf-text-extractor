@@ -8,6 +8,7 @@ import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
 import { areaOf, columns, gutters as pageGutters } from "./columns.js";
+import { GREEK, LATEX, OPERATORS, SUB_FROM, SUB_TO, SUP_FROM, SUP_TO, latexEscape } from "./symbols.js";
 import { NEGATED, NOT, isTexProducer, texChar, texEncoding, texGlyph } from "./texfonts.js";
 
 export { pdfjsLib };
@@ -44,37 +45,8 @@ const WINGDINGS = {
   0xa8: "◻", 0x9f: "•", 0xd8: "➢", 0xfc: "✓", 0xfb: "✗", 0xe0: "→", 0xe8: "➔", 0xf0: "⇨",
 };
 const BULLETS = new Set("•◦▪▫‣⁃●○■□–—-*✓✔➢➤►▶·".split(""));
-const GREEK = {
-  "α": "\\alpha", "β": "\\beta", "γ": "\\gamma", "δ": "\\delta", "ε": "\\epsilon", "ϵ": "\\epsilon",
-  "ζ": "\\zeta", "η": "\\eta", "θ": "\\theta", "ϑ": "\\vartheta", "ι": "\\iota", "κ": "\\kappa",
-  "λ": "\\lambda", "μ": "\\mu", "ν": "\\nu", "ξ": "\\xi", "π": "\\pi", "ϖ": "\\varpi", "ρ": "\\rho",
-  "σ": "\\sigma", "ς": "\\varsigma", "τ": "\\tau", "υ": "\\upsilon", "φ": "\\phi", "ϕ": "\\phi",
-  "χ": "\\chi", "ψ": "\\psi", "ω": "\\omega", "Γ": "\\Gamma", "Δ": "\\Delta", "Θ": "\\Theta",
-  "Λ": "\\Lambda", "Ξ": "\\Xi", "Π": "\\Pi", "Σ": "\\Sigma", "Υ": "\\Upsilon", "Φ": "\\Phi",
-  "Ψ": "\\Psi", "Ω": "\\Omega",
-};
-const OPERATORS = {
-  "∑": "\\sum", "∏": "\\prod", "∐": "\\coprod", "∫": "\\int", "∬": "\\iint", "∭": "\\iiint",
-  "∮": "\\oint", "√": "\\sqrt", "∂": "\\partial", "∇": "\\nabla", "∞": "\\infty", "±": "\\pm",
-  "∓": "\\mp", "×": "\\times", "÷": "\\div", "·": "\\cdot", "⋅": "\\cdot", "∘": "\\circ",
-  "≤": "\\leq", "≥": "\\geq", "≠": "\\neq", "≈": "\\approx", "≡": "\\equiv", "≅": "\\cong",
-  "∼": "\\sim", "∝": "\\propto", "≪": "\\ll", "≫": "\\gg", "∈": "\\in", "∉": "\\notin", "∋": "\\ni",
-  "⊂": "\\subset", "⊃": "\\supset", "⊆": "\\subseteq", "⊇": "\\supseteq", "∪": "\\cup", "∩": "\\cap",
-  "∅": "\\emptyset", "∀": "\\forall", "∃": "\\exists", "∄": "\\nexists", "¬": "\\neg", "∧": "\\wedge",
-  "∨": "\\vee", "⊕": "\\oplus", "⊗": "\\otimes", "→": "\\to", "←": "\\leftarrow",
-  "↔": "\\leftrightarrow", "⇒": "\\Rightarrow", "⇐": "\\Leftarrow", "⇔": "\\Leftrightarrow",
-  "↦": "\\mapsto", "ℝ": "\\mathbb{R}", "ℕ": "\\mathbb{N}", "ℤ": "\\mathbb{Z}", "ℚ": "\\mathbb{Q}",
-  "ℂ": "\\mathbb{C}", "ℓ": "\\ell", "ℏ": "\\hbar", "′": "'", "″": "''", "−": "-", "∗": "*",
-  "…": "\\ldots", "⋯": "\\cdots", "⌊": "\\lfloor", "⌋": "\\rfloor", "⌈": "\\lceil", "⌉": "\\rceil",
-  "⟨": "\\langle", "⟩": "\\rangle", "‖": "\\|", "°": "^{\\circ}",
-};
-const LATEX = { ...GREEK, ...OPERATORS };
 const MATH_CHARS = new Set([...Object.keys(OPERATORS), ...Object.keys(GREEK), "=", "+", "<", ">"]);
 const MATH_FONT_HINTS = ["cmmi", "cmsy", "cmex", "msbm", "msam", "math", "stix", "symbol", "mtmi", "mtsy", "rsfs", "esint"];
-const SUP_FROM = "0123456789+-=()niabcdehijklmoprstuvwxyz";
-const SUP_TO = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱᵃᵇᶜᵈᵉʰⁱʲᵏˡᵐᵒᵖʳˢᵗᵘᵛʷˣʸᶻ";
-const SUB_FROM = "0123456789+-=()aehijklmnoprstuvx";
-const SUB_TO = "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ";
 const SPACES = new Set([0xa0, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x202f, 0x205f, 0x3000]);
 const INVISIBLE = new Set([0xad, 0x200b, 0x200c, 0x200d, 0xfeff]);
 
@@ -101,15 +73,6 @@ function mapChars(text, from, to) {
   const toArr = [...to];
   return [...t].map((c) => toArr[from.indexOf(c)]).join("");
 }
-function latexEscape(text) {
-  let out = "";
-  for (const ch of text) {
-    if (LATEX[ch]) out += LATEX[ch] + (/[a-zA-Z]$/.test(LATEX[ch]) ? " " : "");
-    else if ("{}%#&$".includes(ch)) out += "\\" + ch;
-    else out += ch;
-  }
-  return out.replace(/ {2}/g, " ");
-}
 const stripAccentsLower = (t) => t.toLowerCase().normalize("NFKD").replace(/\p{M}/gu, "");
 const signature = (t) => stripAccentsLower(t).split(/\s+/).filter(Boolean).join(" ").replace(/\d+/g, "#");
 
@@ -119,6 +82,8 @@ const NUMBERED_HEADING = /^(\d{1,2}(\.\d{1,2}){0,4})\.?\s+\S/;
 const CAPTION_WORDS = "(fig(ura|ure)?|tab(ela|le)?|quadro|gr[aá]fico|chart|imagem|image|equa[cç][aã]o|equation|listing|algoritmo|algorithm|esquema|diagrama|diagram)";
 const CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*((?:[a-z]\\.)?\\d+(\\.\\d+)?|[ivxlc]+)\\s*([.:\\-–—|]|\\s|$)`, "i");
 const STRICT_CAPTION = new RegExp(`^${CAPTION_WORDS}\\.?\\s*((?:[a-z]\\.)?\\d+(\\.\\d+)?|[ivxlc]+)\\s*[.:\\-–—|]`, "i");
+const MATH_WORDS = new Set(["sen", "sin", "cos", "tg", "tan", "cotg", "cot", "sec", "cossec", "csc", "log", "ln", "exp", "lim", "max", "min", "arg", "sup", "inf", "det", "mod", "mdc", "mmc", "dx", "dy", "dt", "sgn", "if", "else", "otherwise", "for", "where", "and", "or", "with", "all"]);
+const LABEL = /^\p{L}{3,}:\s/u; // a word and a colon open the line
 const KEY_VALUE = /^[^:]{2,40}:\s+\S/;
 const EQ_NUMBER = /^\(\s*\d{1,3}(\.\d{1,3})?[a-z]?\s*\)$/;
 const PAGE_NUMBER = /^\s*(?:(?:p[áa]g(?:ina)?|page|p)\.?\s*)?[-–—(\[]?\s*(\d{1,4}|[ivxlcdm]{1,6})\s*[-–—)\]]?(?:\s*(?:\/|de|of)\s*\d{1,4})?\s*$/i;
@@ -311,17 +276,18 @@ export function segmentsText(segs) {
   return operatorGaps(plainMath(segs
     .map(([kind, text]) => {
       if (kind === "n") return text;
+      const tail = /\s$/.test(text) ? " " : ""; // the word gap after it: "10⁹ e", not "10⁹e"
       const state = kind === "sub" ? /\((s|l|ℓ|g|aq|v|c)\)$/.exec(text.trim()) : null;
       if (state) { // "CO2(g)": the index, then the state of matter written plainly
         const head = text.trim().slice(0, state.index);
         const lowered = head ? mapChars(head, SUB_FROM, SUB_TO) : "";
-        if (lowered !== null) return lowered + state[0];
+        if (lowered !== null) return lowered + state[0] + tail;
       }
       const conv = kind === "sup" ? mapChars(text, SUP_FROM, SUP_TO) : mapChars(text, SUB_FROM, SUB_TO);
-      if (conv !== null) return conv;
+      if (conv !== null) return conv + tail;
       const t = text.trim();
       const mark = kind === "sup" ? "^" : "_";
-      return t.length === 1 ? mark + t : `${mark}(${t})`;
+      return (t.length === 1 ? mark + t : `${mark}(${t})`) + tail;
     })
     .join("")));
 }
@@ -329,7 +295,7 @@ function segmentsLatex(segs) {
   return segs
     .map(([kind, text]) => {
       const body = mathLatex(latexEscape(kind === "n" ? text : text.trim()));
-      return kind === "n" ? body : (kind === "sup" ? "^{" : "_{") + body + "}";
+      return kind === "n" ? body : (kind === "sup" ? "^{" : "_{") + body + "}" + (/\s$/.test(text) ? " " : "");
     })
     .join("")
     .replace(/\s+/g, " ")
@@ -1169,8 +1135,16 @@ function formulaLike(line) {
   const text = line.text;
   const compact = text.replace(/ /g, "");
   if (!compact || compact.length > 160 || !/[\p{L}\p{N}]/u.test(compact)) return false;
-  const words = text.split(/\s+/).filter((w) => w.length > 3 && /^\p{L}+$/u.test(w));
+  if (LABEL.test(text.trimStart())) return false; // "Dados: massas molares (g·mol⁻¹) H = 1, C = 12": a sentence with values
+  const tokens = text.split(/\s+/);
+  const words = tokens.filter((w) => w.length > 3 && /^\p{L}+$/u.test(w));
   if (words.length >= 5) return false;
+  // "Se f(x) = ax² + bx + c é tal que f(2) = 8, então": a sentence around its math. Three plain
+  // lower-case words say so; names of functions and operators are not words.
+  const plain = tokens.filter((w) => [...w].length > 1 && /^\p{L}+$/u.test(w) && w === w.toLowerCase() && w !== w.toUpperCase());
+  // (Not a numbered equation: "δ = ∑ ηᵢ · sgn(∇L)ᵢ for the L∞ norm (14)".)
+  const numbered = EQ_NUMBER.test(line.spans[line.spans.length - 1].text.trim());
+  if (!numbered && plain.filter((w) => !MATH_WORDS.has(w)).length >= 3) return false;
   const score = mathScore(text);
   return line.math >= 0.4 || score >= 0.22 || (line.hasScripts && score >= 0.1) ||
     (text.includes("=") && words.length <= 1 && /[\p{L}\p{N}]/u.test(compact));
@@ -1368,8 +1342,10 @@ function linesToBlocks(lines) {
     if (!text.trim()) return;
     let thisKind = "paragraph";
     if (ln.mono && text.length > 1) thisKind = "code";
-    else if (formulaLike(ln)) thisKind = "formula";
+    // Before the formula test: the options of a question ("a) 1,0·10⁶") are items, one per
+    // line, however much math they hold — as formulas they would run together.
     else if (listStart(text)) thisKind = "list_item";
+    else if (formulaLike(ln)) thisKind = "formula";
     if (group.length) {
       const prev = group[group.length - 1];
       const size = Math.max(prev.size, 4);
