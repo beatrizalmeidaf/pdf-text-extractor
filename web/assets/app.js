@@ -121,6 +121,17 @@ $("#sample-btn").addEventListener("click", async () => {
 $("#run-btn").addEventListener("click", run);
 ["opt-tables", "opt-formulas", "opt-images"].forEach((id) => $("#" + id).addEventListener("change", () => state.data && run()));
 
+// How the math inside paragraphs is written in Markdown and text; no need to extract again.
+const mathOpt = $("#opt-math");
+mathOpt.checked = store.get("pte-math", "unicode") === "latex";
+const mathMode = () => (mathOpt.checked ? "latex" : "unicode");
+mathOpt.addEventListener("change", () => {
+  store.set("pte-math", mathMode());
+  if (!state.doc) return;
+  renderMarkdown();
+  $("#text-out").textContent = toText(state.doc, { math: mathMode() });
+});
+
 let running = false;
 async function run() {
   if (!state.data || running) return;
@@ -226,7 +237,7 @@ function render() {
   renderMarkdown();
   renderTables(tables);
   renderGallery(images);
-  $("#text-out").textContent = toText(doc);
+  $("#text-out").textContent = toText(doc, { math: mathMode() });
   $("#json-out").textContent = toJson(doc, { embedImages: false });
   showInspector(null);
 }
@@ -343,23 +354,32 @@ function showInspector(b) {
 }
 
 function renderMarkdown() {
-  const md = toMarkdown(state.doc, { images: "embed" });
-  $("#md-source").textContent = toMarkdown(state.doc, { images: "ref" });
+  const math = mathMode();
+  const md = toMarkdown(state.doc, { images: "embed", math });
+  $("#md-source").textContent = toMarkdown(state.doc, { images: "ref", math });
   const target = $("#md-rendered");
   if (window.marked && window.DOMPurify) {
     // $$…$$ blocks are swapped for placeholders so Markdown can't mangle the LaTeX
     // (a "_" would become italics), then KaTeX renders them after sanitizing.
     const formulas = [];
-    const protectedMd = md.replace(/\$\$\n([\s\S]*?)\n\$\$/g, (_, tex) => {
+    let protectedMd = md.replace(/\$\$\n([\s\S]*?)\n\$\$/g, (_, tex) => {
       formulas.push(tex);
       return `<div class="math-ph" data-i="${formulas.length - 1}"></div>`;
     });
+    // In LaTeX mode the math inside a paragraph is $…$ (and a literal dollar is "\$").
+    if (math === "latex") {
+      protectedMd = protectedMd.replace(/(?<!\\)\$([^$\n]+?)(?<!\\)\$/g, (_, tex) => {
+        formulas.push(tex);
+        return `<span class="math-ph" data-inline data-i="${formulas.length - 1}"></span>`;
+      });
+    }
     const html = window.marked.parse(protectedMd, { gfm: true, breaks: false });
     target.innerHTML = window.DOMPurify.sanitize(html);
     target.querySelectorAll(".math-ph").forEach((el) => {
       const tex = formulas[+el.dataset.i] ?? "";
-      if (window.katex) window.katex.render(tex, el, { displayMode: true, throwOnError: false });
-      else el.textContent = `$$ ${tex} $$`;
+      const inline = el.hasAttribute("data-inline");
+      if (window.katex) window.katex.render(tex, el, { displayMode: !inline, throwOnError: false });
+      else el.textContent = inline ? `$${tex}$` : `$$ ${tex} $$`;
     });
   } else {
     target.textContent = md;
@@ -424,33 +444,25 @@ function renderGallery(images) {
 }
 
 // ---------------------------------------------------------------- compare (visual diff)
-const diffMode = () => document.querySelector('input[name="diffmode"]:checked').value;
 function renderDiff() {
   if (!state.doc) return;
   state.diffDirty = false;
-  const overlay = diffMode() === "overlay";
-  $("#diff-opacity-field").hidden = !overlay;
-  const list = $("#diff-list");
-  list.style.setProperty("--diff-opacity", $("#diff-opacity").value / 100);
   renderFidelity($("#fidelity"), state.fidelity, {
     tr,
     hasReference: state.hasReference,
     onPage: (n) => document.querySelector(`.diff-row[data-page="${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
   });
-  renderCompare(list, {
+  renderCompare($("#diff-list"), {
     doc: state.doc,
     pdf: state.pdf,
     fidelity: state.fidelity,
-    mode: diffMode(),
     onlyProblems: $("#diff-only").checked,
     tr,
     typeLabel: (type) => TYPE_LABEL[type] || type,
     onSelect: jumpTo,
   });
 }
-document.querySelectorAll('input[name="diffmode"]').forEach((i) => i.addEventListener("change", renderDiff));
 $("#diff-only").addEventListener("change", renderDiff);
-$("#diff-opacity").addEventListener("input", (e) => $("#diff-list").style.setProperty("--diff-opacity", e.target.value / 100));
 
 function jumpTo(block) {
   switchTab("pages");
@@ -472,7 +484,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 
 $("#copy-btn").addEventListener("click", async () => {
   if (!state.doc) return;
-  await navigator.clipboard.writeText(toMarkdown(state.doc, { images: "ref" }));
+  await navigator.clipboard.writeText(toMarkdown(state.doc, { images: "ref", math: mathMode() }));
   toast(tr("toast.md"));
 });
 
@@ -512,7 +524,7 @@ list.addEventListener("click", async (e) => {
   try {
     if ((f.id === "csv" || f.id === "xlsx") && !tablesOf(state.doc).length) toast(tr("toast.noTables"));
     if (!window.JSZip && ["xlsx", "docx", "zip"].includes(f.id)) throw new Error(tr("toast.zip"));
-    const blob = await exportAs(state.doc, f.id, stem());
+    const blob = await exportAs(state.doc, f.id, stem(), { math: mathMode() });
     download(blob, `${stem()}${f.id === "csv" ? "-tabelas" : ""}.${f.ext}`);
   } catch (err) {
     toast(err.message, true);
