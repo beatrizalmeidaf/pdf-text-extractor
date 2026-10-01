@@ -5,6 +5,7 @@ papero-extract extract artigo.pdf -o artigo.md --images # + pasta images/ ao lad
 papero-extract extract artigo.pdf -f json -o artigo.json
 papero-extract extract artigo.pdf -f csv -o tabelas.csv # só as tabelas
 papero-extract extract contrato.docx -f text            # qualquer formato que o Tika lê
+papero-extract extract artigo.pdf --math latex          # matemática do texto como $…$
 papero-extract extract artigo.pdf --fast                # só texto, via Tika (mais rápido)
 papero-extract batch ./documentos -o ./dataset          # pasta -> chunks + relatório
 papero-extract serve --port 8000
@@ -81,10 +82,10 @@ def _structured(args: argparse.Namespace) -> str:
     fmt = args.format
     if fmt == "markdown":
         return doc.to_markdown(
-            images="ref" if args.output else "none", page_breaks=args.page_breaks
+            images="ref" if args.output else "none", page_breaks=args.page_breaks, math=args.math
         )
     if fmt == "text":
-        return doc.text
+        return doc.to_text(math=args.math)
     if fmt == "html":
         return doc.to_html(images="embed")
     if fmt == "csv":
@@ -138,6 +139,7 @@ def _batch(args: argparse.Namespace) -> int:
     options = BatchOptions(
         formats=formats,
         chunk_chars=args.chunk_size,
+        math=args.math,
         tables=not args.no_tables,
         formulas=not args.no_formulas,
         ocr=args.ocr,
@@ -208,6 +210,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
 
+    math_option = {
+        "choices": ("unicode", "latex"),
+        "default": "unicode",
+        "help": "matemática no texto: como se lê (x² + 1) ou em LaTeX ($x^{2} + 1$)",
+    }
     ex = sub.add_parser("extract", help="extrair texto e estrutura de um arquivo")
     ex.add_argument("file")
     ex.add_argument("-o", "--output", help="arquivo de saída (padrão: stdout)")
@@ -231,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     ex.add_argument("--ocr-language", default="por+eng")
     ex.add_argument("--no-tika", action="store_true", help="só o motor de layout (sem Java)")
     ex.add_argument("--page-breaks", action="store_true", help="marcar o início de cada página")
+    ex.add_argument("--math", **math_option)
     ex.add_argument("--fast", action="store_true", help="só texto, via Tika (o mais rápido)")
     ex.add_argument("--raw", action="store_true", help="--fast: sem nenhuma limpeza")
     ex.add_argument("--keep-headers", action="store_true", help="--fast: manter cabeçalhos/rodapés")
@@ -259,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     bt.add_argument(
         "--chunk-size", type=int, default=1500, help="tamanho máximo de um chunk, em caracteres"
     )
+    bt.add_argument("--math", **math_option)
     bt.add_argument("--password")
     bt.add_argument("--no-tables", action="store_true", help="não detectar tabelas")
     bt.add_argument("--no-formulas", action="store_true", help="não detectar fórmulas")
