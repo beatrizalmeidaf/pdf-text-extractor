@@ -107,6 +107,11 @@ for block in doc.pages[0].blocks:  # reading order, with positions
 doc.to_html()  # keeps alignment and indents
 doc.to_dict()  # the full JSON
 
+# Math inside paragraphs as LaTeX, in Markdown or plain text — found by what it is made of
+# (operators, functions, exponents, roots), even when it is set in the text font:
+doc.to_markdown(math="latex")  # "Se $\operatorname{tg} x - \operatorname{cotg} x = 1$, então…"
+doc.to_text(math="latex")  # "a) $1{,}035\cdot 10^{9}$ e $5{,}5\cdot 10^{7}$"
+
 extract("slides.pptx").to_markdown()  # any format Apache Tika reads
 extract_text("contract.pdf").text  # fastest: clean text only
 ```
@@ -131,6 +136,7 @@ papero-extract extract paper.pdf -o paper.md --images   # Markdown + images/ fol
 papero-extract extract paper.pdf -o paper.json          # format from the extension
 papero-extract extract paper.pdf -f csv -o tables.csv   # tables only
 papero-extract extract paper.pdf -p 1-5 -f html
+papero-extract extract paper.pdf --math latex -o p.md   # math in the text as $…$
 papero-extract extract paper.pdf --fast                 # clean text only
 papero-extract batch ./documents -o ./dataset           # a whole folder, for RAG
 papero-extract serve --port 8000                        # API + browser app
@@ -173,7 +179,7 @@ The report checks every document against its own PDF — no ground truth, so rea
 | `figures` | every "Figure N" caption has its figure |
 | `formulas` | each formula has LaTeX and no unmapped glyph |
 
-The browser app runs the same checks on the PDF you drop: the fidelity figure sits next to the page count, and the **Compare** tab puts each page beside what was extracted from it (side by side or overlaid), marking the PDF text that is not in the output and the blocks that failed a check.
+The browser app runs the same checks on the PDF you drop: the fidelity figure sits next to the page count, and the **Compare** tab puts each page beside what was extracted from it, marking the PDF text that is not in the output and the blocks that failed a check.
 
 ```python
 from papero_extract import extract
