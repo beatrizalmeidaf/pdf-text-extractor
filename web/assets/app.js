@@ -1,11 +1,10 @@
 import { extractDocument, openPdf } from "./engine.js";
+import { applyStatic, lang, setLang, t as tr } from "./i18n.js";
 import { FORMATS, esc, exportAs, imagesOf, tablesCsv, tablesOf, toJson, toMarkdown, toText } from "./export.js";
 
 const $ = (s) => document.querySelector(s);
-const TYPE_LABEL = {
-  heading: "Título", paragraph: "Parágrafo", list_item: "Item de lista", table: "Tabela", figure: "Figura",
-  formula: "Fórmula", caption: "Legenda", code: "Código", header: "Cabeçalho", footer: "Rodapé", page_number: "Nº de página",
-};
+const TYPES = ["heading", "paragraph", "list_item", "table", "figure", "formula", "caption", "code", "header", "footer", "page_number"];
+const TYPE_LABEL = new Proxy({}, { get: (_, type) => (TYPES.includes(type) ? tr(`type.${type}`) : undefined) });
 const typeColor = (t) => `var(--t-${["header", "footer", "page_number"].includes(t) ? "furniture" : t})`;
 const store = {
   get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -54,14 +53,10 @@ function engine() { return document.querySelector('input[name="engine"]:checked'
 function syncEngine() {
   const server = engine() === "server";
   $("#server-field").hidden = !server;
-  $("#engine-hint").textContent = server
-    ? "O arquivo vai para a sua API: Tika + PDFium, OCR e outros formatos."
-    : "Nada sai do seu computador: o PDF é lido aqui mesmo, com pdf.js.";
-  $("#privacy-text").textContent = server
-    ? "No modo servidor o arquivo é enviado à URL acima e apagado ao fim da requisição."
-    : "No modo navegador o arquivo não é enviado a lugar nenhum.";
+  $("#engine-hint").textContent = tr(server ? "engine.hint.server" : "engine.hint.browser");
+  $("#privacy-text").textContent = tr(server ? "privacy.server" : "privacy.browser");
   $("#file").accept = server ? "" : "application/pdf,.pdf";
-  $("#drop strong").textContent = server ? "Arraste um documento aqui" : "Arraste um PDF aqui";
+  $("#drop strong").textContent = tr(server ? "drop.doc" : "drop.pdf");
   store.set("pte-engine", engine());
 }
 engineInputs.forEach((i) => i.addEventListener("change", syncEngine));
@@ -100,7 +95,7 @@ document.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfe
 async function setFile(file) {
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
   if (!isPdf && engine() === "browser") {
-    toast("No navegador só PDFs. Para DOCX, PPTX, XLSX ou HTML, use o modo Servidor (Tika).", true);
+    toast(tr("toast.onlyPdf"), true);
     return;
   }
   state.file = file;
@@ -116,7 +111,7 @@ $("#sample-btn").addEventListener("click", async () => {
     const blob = await r.blob();
     await setFile(new File([blob], "exemplo.pdf", { type: "application/pdf" }));
   } catch {
-    toast("Não consegui carregar o exemplo.", true);
+    toast(tr("toast.sample"), true);
   }
 });
 
@@ -154,7 +149,7 @@ async function run() {
     render();
   } catch (e) {
     console.error(e);
-    toast(e.message || "Falha na extração.", true);
+    toast((e.code && tr(`err.${e.code}`) !== `err.${e.code}` ? tr(`err.${e.code}`) : e.message) || tr("toast.failed"), true);
   } finally {
     running = false;
     btn.disabled = false;
@@ -174,10 +169,10 @@ async function extractOnServer(opts) {
   try {
     r = await fetch(`${base}/v1/extract?${q}`, { method: "POST", body: form });
   } catch {
-    throw new Error(`Não consegui falar com ${base}. A API está no ar e com CORS liberado?`);
+    throw new Error(tr("toast.server", { url: base }));
   }
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body?.error?.message || `Erro ${r.status} na API.`);
+  if (!r.ok) throw new Error(body?.error?.message || tr("toast.apiError", { status: r.status }));
   setProgress(0.9);
   return body;
 }
@@ -194,14 +189,14 @@ function render() {
   stats.hidden = false;
   const t = doc.timings || {};
   stats.innerHTML = [
-    `<span><b>${doc.pages_extracted ?? doc.pages.length}</b>/${doc.page_count} páginas</span>`,
+    `<span><b>${doc.pages_extracted ?? doc.pages.length}</b>/${doc.page_count} ${tr("stats.pages")}</span>`,
     `<span><b>${fmtMs(doc.elapsed_ms)}</b>${t.tika_ms ? ` (Tika ${fmtMs(t.tika_ms)} ‖ layout ${fmtMs(t.layout_ms)})` : ""}</span>`,
-    `<span><b>${count("heading")}</b> títulos</span>`,
-    `<span><b>${tables.length}</b> tabelas</span>`,
-    `<span><b>${count("figure")}</b> figuras</span>`,
-    `<span><b>${count("formula")}</b> fórmulas</span>`,
-    `<span>motor: <b>${esc(doc.engine)}</b></span>`,
-    doc.likely_scanned ? `<span class="warn">parece escaneado — use o modo servidor com OCR</span>` : "",
+    `<span><b>${count("heading")}</b> ${tr("stats.headings")}</span>`,
+    `<span><b>${tables.length}</b> ${tr("stats.tables")}</span>`,
+    `<span><b>${count("figure")}</b> ${tr("stats.figures")}</span>`,
+    `<span><b>${count("formula")}</b> ${tr("stats.formulas")}</span>`,
+    `<span>${tr("stats.engine")}: <b>${esc(doc.engine)}</b></span>`,
+    doc.likely_scanned ? `<span class="warn">${tr("stats.scanned")}</span>` : "",
     ...(doc.warnings || []).map((w) => `<span class="warn">${esc(w.split(":")[0])}</span>`),
   ].join("");
   $("#copy-btn").disabled = false;
@@ -222,7 +217,7 @@ function renderLegend(blocks) {
   const present = [...new Set(blocks.map((b) => b.type))];
   const legend = $("#legend");
   legend.innerHTML = "";
-  for (const t of Object.keys(TYPE_LABEL).filter((x) => present.includes(x))) {
+  for (const t of TYPES.filter((x) => present.includes(x))) {
     const n = blocks.filter((b) => b.type === t).length;
     const chip = document.createElement("button");
     chip.className = "chip";
@@ -277,7 +272,7 @@ function renderPages() {
     observer.observe(wrap);
   }
   if (!state.doc.pages.some((p) => p.width)) {
-    list.innerHTML = `<p class="hint">Este formato não tem páginas com posição (o Tika lê o conteúdo, não o layout). Veja as abas Markdown e Tabelas.</p>`;
+    list.innerHTML = `<p class="hint">${tr("no.positions")}</p>`;
   }
 }
 
@@ -306,24 +301,24 @@ function select(block, el) {
 function showInspector(b) {
   const box = $("#inspector");
   if (!b) {
-    box.innerHTML = `<h3>Clique num bloco</h3><p class="hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>`;
+    box.innerHTML = `<h3>${tr("inspector.title")}</h3><p class="hint">${tr("inspector.hint")}</p>`;
     return;
   }
   let content = esc(b.text || "");
   if (b.type === "table" && b.rows) content = esc(b.rows.map((r) => r.join(" | ")).join("\n"));
   const extra = [
-    b.level != null ? `<span>nível</span><b>${b.level}</b>` : "",
-    b.marker ? `<span>marcador</span><b>${esc(b.marker)}</b>` : "",
-    b.number ? `<span>número</span><b>${esc(b.number)}</b>` : "",
-    b.caption ? `<span>legenda</span><b>${esc(b.caption)}</b>` : "",
-    b.style ? `<span>fonte</span><b>${b.style.size} pt${b.style.bold ? " · negrito" : ""}</b>` : "",
+    b.level != null ? `<span>${tr("insp.level")}</span><b>${b.level}</b>` : "",
+    b.marker ? `<span>${tr("insp.marker")}</span><b>${esc(b.marker)}</b>` : "",
+    b.number ? `<span>${tr("insp.number")}</span><b>${esc(b.number)}</b>` : "",
+    b.caption ? `<span>${tr("insp.caption")}</span><b>${esc(b.caption)}</b>` : "",
+    b.style ? `<span>${tr("insp.font")}</span><b>${b.style.pt || b.style.size} pt${b.style.font ? " · " + esc(b.style.font) : ""}${b.style.bold ? " · " + tr("insp.bold") : ""}</b>` : "",
   ].join("");
   box.innerHTML = `
     <h3><span class="type-dot" style="--c:${typeColor(b.type)}"></span>${TYPE_LABEL[b.type] || b.type}</h3>
     <div class="kv"><span>id</span><b>${esc(b.id)}</b><span>bbox</span><b>${b.bbox ? b.bbox.map((v) => v.toFixed(1)).join(", ") : "—"}</b>${extra}</div>
     ${b.latex ? `<div class="kv"><span>LaTeX</span><b>${esc(b.latex)}</b></div><div id="insp-math"></div>` : ""}
-    <pre>${content || "<em>(sem texto)</em>"}</pre>
-    ${b.image?.data ? `<img alt="Recorte do bloco" src="data:${b.image.mime};base64,${b.image.data}">` : ""}`;
+    <pre>${content || `<em>${tr("insp.empty")}</em>`}</pre>
+    ${b.image?.data ? `<img alt="${tr("insp.crop")}" src="data:${b.image.mime};base64,${b.image.data}">` : ""}`;
   if (b.latex && window.katex) {
     try { window.katex.render(b.latex, box.querySelector("#insp-math"), { displayMode: true, throwOnError: false }); } catch { /* keep text */ }
   }
@@ -362,7 +357,7 @@ document.querySelectorAll('input[name="mdmode"]').forEach((i) =>
 function renderTables(tables) {
   const list = $("#tables-list");
   if (!tables.length) {
-    list.innerHTML = `<p class="hint">Nenhuma tabela encontrada${$("#opt-tables").checked ? "" : " (a detecção está desligada)"}.</p>`;
+    list.innerHTML = `<p class="hint">${tr("tables.none")}${$("#opt-tables").checked ? "" : tr("tables.off")}.</p>`;
     return;
   }
   list.innerHTML = "";
@@ -373,16 +368,16 @@ function renderTables(tables) {
     const head = t.rows[0].map((c) => `<th>${esc(c)}</th>`).join("");
     const body = t.rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${esc(c).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`).join("");
     card.innerHTML = `
-      <header><b>Tabela ${k + 1}</b><span class="meta">p. ${page} · ${t.rows.length} × ${Math.max(...t.rows.map((r) => r.length))}${t.caption ? " · " + esc(t.caption) : ""}</span>
+      <header><b>${tr("tables.title")} ${k + 1}</b><span class="meta">p. ${page} · ${t.rows.length} × ${Math.max(...t.rows.map((r) => r.length))}${t.caption ? " · " + esc(t.caption) : ""}</span>
         <span class="spacer"></span>
-        <button class="btn small-btn" data-act="copy" type="button">Copiar CSV</button>
-        <button class="btn small-btn" data-act="show" type="button">Ver na página</button></header>
+        <button class="btn small-btn" data-act="copy" type="button">${tr("tables.copy")}</button>
+        <button class="btn small-btn" data-act="show" type="button">${tr("tables.show")}</button></header>
       <div class="body"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
-        ${t.image?.data ? `<img class="crop" alt="Recorte da tabela ${k + 1}" src="data:${t.image.mime};base64,${t.image.data}">` : ""}</div>`;
+        ${t.image?.data ? `<img class="crop" alt="${tr("tables.crop")} ${k + 1}" src="data:${t.image.mime};base64,${t.image.data}">` : ""}</div>`;
     card.querySelector('[data-act="copy"]').addEventListener("click", async () => {
       const one = { ...state.doc, pages: [{ blocks: [t] }] };
       await navigator.clipboard.writeText(tablesCsv(one).split("\r\n").slice(1).join("\n"));
-      toast("CSV copiado");
+      toast(tr("toast.csv"));
     });
     card.querySelector('[data-act="show"]').addEventListener("click", () => jumpTo(t));
     list.append(card);
@@ -392,7 +387,7 @@ function renderTables(tables) {
 function renderGallery(images) {
   const g = $("#gallery");
   if (!images.length) {
-    g.innerHTML = `<p class="hint">Nenhuma imagem${$("#opt-images").checked ? "" : " — ative “Recortar imagens” nas opções"}.</p>`;
+    g.innerHTML = `<p class="hint">${tr("images.none")}${$("#opt-images").checked ? "" : tr("images.off")}.</p>`;
     return;
   }
   g.innerHTML = "";
@@ -430,12 +425,29 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 $("#copy-btn").addEventListener("click", async () => {
   if (!state.doc) return;
   await navigator.clipboard.writeText(toMarkdown(state.doc, { images: "ref" }));
-  toast("Markdown copiado");
+  toast(tr("toast.md"));
 });
 
 const menu = $("#export-menu");
 const list = $("#export-list");
-list.innerHTML = FORMATS.map((f) => `<button role="menuitem" type="button" data-fmt="${f.id}"><span class="ext">.${f.ext}</span><span>${f.label}<small>${f.hint}</small></span></button>`).join("");
+function renderExportMenu() {
+  list.innerHTML = FORMATS.map((f) => `<button role="menuitem" type="button" data-fmt="${f.id}"><span class="ext">.${f.ext}</span><span>${tr(`fmt.${f.id}`)}<small>${tr(`fmt.${f.id}.hint`)}</small></span></button>`).join("");
+}
+renderExportMenu();
+
+// ---------------------------------------------------------------- language (pt / en)
+const langBtn = $("#lang-btn");
+const syncLangButton = () => (langBtn.textContent = lang === "pt" ? "EN" : "PT");
+applyStatic();
+syncLangButton();
+syncEngine();
+langBtn.addEventListener("click", () => {
+  setLang(lang === "pt" ? "en" : "pt");
+  syncLangButton();
+  syncEngine();
+  renderExportMenu();
+  if (state.doc) render(); // re-label legend, stats, tables and inspector
+});
 $("#export-btn").addEventListener("click", (e) => {
   e.stopPropagation();
   const open = !menu.classList.contains("open");
@@ -450,8 +462,8 @@ list.addEventListener("click", async (e) => {
   if (!btn || !state.doc) return;
   const f = FORMATS.find((x) => x.id === btn.dataset.fmt);
   try {
-    if ((f.id === "csv" || f.id === "xlsx") && !tablesOf(state.doc).length) toast("Nenhuma tabela neste documento — o arquivo sairá vazio.");
-    if (!window.JSZip && ["xlsx", "docx", "zip"].includes(f.id)) throw new Error("Biblioteca de ZIP não carregou; verifique a conexão.");
+    if ((f.id === "csv" || f.id === "xlsx") && !tablesOf(state.doc).length) toast(tr("toast.noTables"));
+    if (!window.JSZip && ["xlsx", "docx", "zip"].includes(f.id)) throw new Error(tr("toast.zip"));
     const blob = await exportAs(state.doc, f.id, stem());
     download(blob, `${stem()}${f.id === "csv" ? "-tabelas" : ""}.${f.ext}`);
   } catch (err) {

@@ -114,6 +114,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .topbar nav a:hover, .icon-btn:hover { background: var(--surface-2); color: var(--text); }
 .icon-btn svg, .topbar nav svg { width: 18px; height: 18px; }
+.lang-btn { font: 600 12.5px/1 var(--mono); letter-spacing: .04em; border: 1px solid var(--border); padding: 6px 9px; }
 
 /* ---------------------------------------------------------------- layout */
 .app {

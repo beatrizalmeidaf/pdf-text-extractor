@@ -9,6 +9,9 @@
   <meta name="author" content="Beatriz Almeida">
   <meta name="theme-color" content="#c2410c">
   <link rel="canonical" href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/">
+  <link rel="alternate" hreflang="pt-BR" href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/?lang=pt">
+  <link rel="alternate" hreflang="en" href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/?lang=en">
+  <link rel="alternate" hreflang="x-default" href="https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/">
   <meta property="og:type" content="website">
   <meta property="og:title" content="papero — estrutura de documentos sem a stack pesada">
   <meta property="og:description" content="Extração estruturada de PDFs: ordem de leitura, tabelas, fórmulas em LaTeX, imagens e posições. Exporte para Markdown, JSON, Excel, Word, CSV ou HTML.">
@@ -48,76 +51,77 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="papero — início">
+    <a class="brand" href="./" aria-label="papero — início" data-i18n-attr="aria-label:brand.home">
       <img class="brand-mark" src="assets/icon.svg" alt="" width="30" height="30">
-      <span>papero<small>estrutura de documentos, sem a stack pesada</small></span>
+      <span>papero<small data-i18n="brand.tagline">estrutura de documentos, sem a stack pesada</small></span>
     </a>
     <nav>
       <a href="https://github.com/beatrizalmeidaf/papero-pdf-text-extractor#readme" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        <span class="label">Documentação</span>
+        <span class="label" data-i18n="nav.docs">Documentação</span>
       </a>
       <a href="https://github.com/beatrizalmeidaf/papero-pdf-text-extractor" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.7.1-.7 1.2.1 1.9 1.3 1.9 1.3 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
         <span class="label">GitHub</span>
       </a>
-      <button class="icon-btn" id="theme-btn" type="button" aria-label="Alternar tema claro/escuro">
+      <button class="icon-btn lang-btn" id="lang-btn" type="button" data-i18n-attr="aria-label:nav.lang;title:nav.lang" aria-label="Switch to English">EN</button>
+      <button class="icon-btn" id="theme-btn" type="button" aria-label="Alternar tema claro/escuro" data-i18n-attr="aria-label:nav.theme">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
     </nav>
   </header>
 
   <main class="app">
-    <aside class="panel sidebar" aria-label="Arquivo e opções">
+    <aside class="panel sidebar" aria-label="Arquivo e opções" data-i18n-attr="aria-label:aside.label">
       <div class="intro">
-        <h1>PDF para Markdown, tabelas e fórmulas</h1>
-        <p>Ordem de leitura em colunas, tabelas estruturadas, LaTeX, imagens e a posição de cada bloco. Exporte no formato que precisar.</p>
+        <h1 data-i18n="intro.title">PDF para Markdown, tabelas e fórmulas</h1>
+        <p data-i18n="intro.text">Ordem de leitura em colunas, tabelas estruturadas, LaTeX, imagens e a posição de cada bloco. Exporte no formato que precisar.</p>
       </div>
 
       <div class="drop" id="drop" role="button" tabindex="0" aria-describedby="drop-hint">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
         <strong>Arraste um PDF aqui</strong>
-        <span id="drop-hint">ou clique para escolher</span>
+        <span id="drop-hint" data-i18n="drop.hint">ou clique para escolher</span>
         <div class="file-name" id="file-name"></div>
         <input type="file" id="file" class="sr-only" accept="application/pdf,.pdf">
       </div>
-      <p class="hint" style="text-align:center;margin-top:-8px">Sem um PDF à mão? <button type="button" class="sample-link" id="sample-btn">Use o exemplo</button></p>
+      <p class="hint" style="text-align:center;margin-top:-8px"><span data-i18n="sample.before">Sem um PDF à mão?</span> <button type="button" class="sample-link" id="sample-btn" data-i18n="sample.link">Use o exemplo</button></p>
 
       <fieldset>
-        <legend>Motor</legend>
-        <div class="segmented" role="radiogroup" aria-label="Motor de extração">
-          <label><input type="radio" name="engine" value="browser" checked><span>No navegador</span></label>
-          <label><input type="radio" name="engine" value="server"><span>Servidor (Tika)</span></label>
+        <legend data-i18n="engine.legend">Motor</legend>
+        <div class="segmented" role="radiogroup" aria-label="Motor de extração" data-i18n-attr="aria-label:engine.label">
+          <label><input type="radio" name="engine" value="browser" checked><span data-i18n="engine.browser">No navegador</span></label>
+          <label><input type="radio" name="engine" value="server"><span data-i18n="engine.server">Servidor (Tika)</span></label>
         </div>
         <p class="hint" id="engine-hint">Nada sai do seu computador: o PDF é lido aqui mesmo, com pdf.js.</p>
         <div class="field" id="server-field" hidden>
-          <label for="server-url">URL da API</label>
+          <label for="server-url" data-i18n="server.url">URL da API</label>
           <input type="url" id="server-url" placeholder="http://localhost:8000" autocomplete="url">
-          <p class="hint">Suba a sua com <code>docker compose up</code>. Aceita também DOCX, PPTX, XLSX, HTML e EPUB, e faz OCR de escaneados.</p>
+          <p class="hint" data-i18n-html="server.hint">Suba a sua com <code>docker compose up</code>. Aceita também DOCX, PPTX, XLSX, HTML e EPUB, e faz OCR de escaneados.</p>
         </div>
       </fieldset>
 
       <fieldset>
-        <legend>Opções</legend>
+        <legend data-i18n="options.legend">Opções</legend>
         <div class="row-2">
           <div class="field">
-            <label for="pages">Páginas</label>
-            <input type="text" id="pages" placeholder="todas" inputmode="numeric" aria-describedby="pages-hint">
+            <label for="pages" data-i18n="options.pages">Páginas</label>
+            <input type="text" id="pages" placeholder="todas" data-i18n-attr="placeholder:options.pages.ph" inputmode="numeric" aria-describedby="pages-hint">
           </div>
           <div class="field">
-            <label for="password">Senha</label>
-            <input type="password" id="password" placeholder="se houver" autocomplete="off">
+            <label for="password" data-i18n="options.password">Senha</label>
+            <input type="password" id="password" placeholder="se houver" data-i18n-attr="placeholder:options.password.ph" autocomplete="off">
           </div>
         </div>
-        <p class="hint" id="pages-hint">Ex.: <code>1-3,5,10-</code></p>
-        <label class="check"><input type="checkbox" id="opt-tables" checked><span>Tabelas estruturadas<small>com e sem bordas</small></span></label>
-        <label class="check"><input type="checkbox" id="opt-formulas" checked><span>Fórmulas em LaTeX<small>sobrescrito, subscrito e símbolos</small></span></label>
-        <label class="check"><input type="checkbox" id="opt-images" checked><span>Recortar imagens<small>figuras, tabelas e fórmulas em PNG</small></span></label>
+        <p class="hint" id="pages-hint" data-i18n-html="options.pages.hint">Ex.: <code>1-3,5,10-</code></p>
+        <label class="check"><input type="checkbox" id="opt-tables" checked><span data-i18n-html="options.tables">Tabelas estruturadas<small>com e sem bordas</small></span></label>
+        <label class="check"><input type="checkbox" id="opt-formulas" checked><span data-i18n-html="options.formulas">Fórmulas em LaTeX<small>sobrescrito, subscrito e símbolos</small></span></label>
+        <label class="check"><input type="checkbox" id="opt-images" checked><span data-i18n-html="options.images">Recortar imagens<small>figuras, tabelas e fórmulas em PNG</small></span></label>
       </fieldset>
 
       <button class="btn btn-primary" id="run-btn" type="button" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 5 5L20 7"/></svg>
-        Extrair
+        <span data-i18n="run">Extrair</span>
       </button>
       <div class="progress" id="progress" aria-hidden="true"><div></div></div>
 
@@ -127,21 +131,21 @@
       </p>
     </aside>
 
-    <section class="panel main" aria-label="Resultado">
+    <section class="panel main" aria-label="Resultado" data-i18n-attr="aria-label:result.label">
       <div class="toolbar">
-        <div class="tabs" role="tablist" aria-label="Visualizações">
-          <button role="tab" aria-selected="true" data-view="pages">Páginas</button>
+        <div class="tabs" role="tablist" aria-label="Visualizações" data-i18n-attr="aria-label:tabs.label">
+          <button role="tab" aria-selected="true" data-view="pages"><span data-i18n="tabs.pages">Páginas</span></button>
           <button role="tab" aria-selected="false" data-view="markdown">Markdown</button>
-          <button role="tab" aria-selected="false" data-view="tables">Tabelas<span class="count" id="n-tables">0</span></button>
-          <button role="tab" aria-selected="false" data-view="images">Imagens<span class="count" id="n-images">0</span></button>
-          <button role="tab" aria-selected="false" data-view="text">Texto</button>
+          <button role="tab" aria-selected="false" data-view="tables"><span data-i18n="tabs.tables">Tabelas</span><span class="count" id="n-tables">0</span></button>
+          <button role="tab" aria-selected="false" data-view="images"><span data-i18n="tabs.images">Imagens</span><span class="count" id="n-images">0</span></button>
+          <button role="tab" aria-selected="false" data-view="text"><span data-i18n="tabs.text">Texto</span></button>
           <button role="tab" aria-selected="false" data-view="json">JSON</button>
         </div>
         <span class="spacer"></span>
-        <button class="btn small-btn" id="copy-btn" type="button" disabled>Copiar Markdown</button>
+        <button class="btn small-btn" id="copy-btn" type="button" disabled data-i18n="copy.md">Copiar Markdown</button>
         <div class="menu" id="export-menu">
           <button class="btn btn-primary small-btn" id="export-btn" type="button" aria-haspopup="true" aria-expanded="false" disabled>
-            Exportar
+            <span data-i18n="export">Exportar</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div class="menu-list" role="menu" id="export-list"></div>
@@ -153,9 +157,9 @@
         <div class="empty" id="empty">
           <div>
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-            <h2>Escolha um PDF para ver a estrutura</h2>
-            <p>Cada bloco aparece destacado na página, no lugar exato onde está.</p>
-            <ul>
+            <h2 data-i18n="empty.title">Escolha um PDF para ver a estrutura</h2>
+            <p data-i18n="empty.text">Cada bloco aparece destacado na página, no lugar exato onde está.</p>
+            <ul data-i18n-html="empty.list">
               <li>Ordem de leitura correta em documentos de duas ou três colunas</li>
               <li>Tabelas com e sem bordas viram linhas e colunas (CSV, Excel)</li>
               <li>Fórmulas com sobrescrito, subscrito e símbolos viram LaTeX</li>
@@ -170,16 +174,16 @@
             <div class="pages" id="pages-list"></div>
           </div>
           <aside class="panel inspector" id="inspector" aria-live="polite">
-            <h3>Clique num bloco</h3>
-            <p class="hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>
+            <h3 data-i18n="inspector.title">Clique num bloco</h3>
+            <p class="hint" data-i18n="inspector.hint">Para ver o tipo, a posição (bbox em pontos, origem no topo) e o conteúdo extraído.</p>
           </aside>
         </div>
       </div>
       <div class="view" id="view-markdown" role="tabpanel" hidden>
         <div class="md-actions">
-          <div class="segmented" style="width:220px" role="radiogroup" aria-label="Modo do Markdown">
-            <label><input type="radio" name="mdmode" value="rendered" checked><span>Visualizar</span></label>
-            <label><input type="radio" name="mdmode" value="source"><span>Código</span></label>
+          <div class="segmented" style="width:220px" role="radiogroup" aria-label="Modo do Markdown" data-i18n-attr="aria-label:md.mode">
+            <label><input type="radio" name="mdmode" value="rendered" checked><span data-i18n="md.rendered">Visualizar</span></label>
+            <label><input type="radio" name="mdmode" value="source"><span data-i18n="md.source">Código</span></label>
           </div>
         </div>
         <article class="prose" id="md-rendered"></article>
@@ -194,22 +198,22 @@
 
   <footer class="site-footer">
     <details>
-      <summary>Como funciona e como usar em código</summary>
+      <summary data-i18n="footer.summary">Como funciona e como usar em código</summary>
       <div class="features">
         <div>
-          <h3>No navegador</h3>
-          <p>O motor de layout roda em JavaScript sobre o pdf.js: agrupa glifos em linhas, detecta colunas com um XY-cut que não confunde coluna de texto com coluna de tabela, reconstrói tabelas pelas réguas ou pelo alinhamento e transforma sobrescritos em LaTeX.</p>
+          <h3 data-i18n="footer.browser.title">No navegador</h3>
+          <p data-i18n="footer.browser.text">O motor de layout roda em JavaScript sobre o pdf.js: agrupa glifos em linhas, detecta colunas com um XY-cut que não confunde coluna de texto com coluna de tabela, reconstrói tabelas pelas réguas ou pelo alinhamento e transforma sobrescritos em LaTeX.</p>
         </div>
         <div>
-          <h3>No servidor</h3>
-          <p>O mesmo algoritmo roda em Python sobre o PDFium, em paralelo com o Apache Tika, que adiciona metadados, títulos marcados do PDF, OCR com Tesseract e mais de mil formatos (DOCX, PPTX, XLSX, EPUB…).</p>
+          <h3 data-i18n="footer.server.title">No servidor</h3>
+          <p data-i18n="footer.server.text">O mesmo algoritmo roda em Python sobre o PDFium, em paralelo com o Apache Tika, que adiciona metadados, títulos marcados do PDF, OCR com Tesseract e mais de mil formatos (DOCX, PPTX, XLSX, EPUB…).</p>
         </div>
         <div>
-          <h3>Em Python</h3>
+          <h3 data-i18n="footer.python.title">Em Python</h3>
           <p><code>pip install pdf-text-api</code><br><code>from pdf_text_api import extract</code><br><code>extract("a.pdf", images=True).to_markdown()</code></p>
         </div>
         <div>
-          <h3>Via API</h3>
+          <h3 data-i18n="footer.api.title">Via API</h3>
           <p><code>curl -F file=@a.pdf "localhost:8000/v1/extract?format=markdown"</code></p>
         </div>
       </div>

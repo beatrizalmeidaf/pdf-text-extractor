@@ -1701,7 +1701,7 @@ export async function extractDocument(data, opts = {}) {
   const elapsed = performance.now() - started;
   const doc = {
     schema: SCHEMA,
-    engine: "pdfjs (navegador)",
+    engine: "pdf.js",
     source_type: "application/pdf",
     page_count: pdf.numPages,
     pages_extracted: pages.length,
