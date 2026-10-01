@@ -267,7 +267,11 @@ function wordFont(name) {
 function docxRuns(b, extraProps = "") {
   const pt = b.style?.pt;
   const font = wordFont(b.style?.font);
-  const base = (b.style?.tracking ? `<w:spacing w:val="${Math.round(b.style.tracking * TWIP)}"/>` : "") +
+  // Running text is set a hair tighter (0.15 pt per letter, not visible): Word's line
+  // breaks differ from the page's by a word here and there, and a paragraph that gains a
+  // line pushes the page over.
+  const tight = b.format?.leading ? '<w:spacing w:val="-3"/>' : "";
+  const base = (b.style?.tracking ? `<w:spacing w:val="${Math.round(b.style.tracking * TWIP)}"/>` : tight) +
     (pt ? `<w:sz w:val="${Math.round(pt * 2)}"/><w:szCs w:val="${Math.round(pt * 2)}"/>` : "") +
     (font ? `<w:rFonts w:ascii="${xmlEsc(font)}" w:hAnsi="${xmlEsc(font)}" w:cs="${xmlEsc(font)}"/>` : "");
   const runs = b.runs?.length ? b.runs : [{ text: b.text || "", bold: !!b.style?.bold, italic: false, script: null }];
@@ -378,10 +382,23 @@ export async function toDocx(doc) {
 
   // A run of blocks down one column, `left` being that column's left edge.
   // Returns the bottom of the last block.
+  // `bottom` follows where Word's cursor really is: a paragraph is as tall as its lines
+  // (not as its glyph boxes), so each one is centred on the place it had on the page and
+  // the space before the next one absorbs the difference. Nothing piles up down the page.
+  const TEXT = new Set(["paragraph", "heading", "list_item", "caption"]);
+  const placed = (b) => {
+    const top = b.bbox[1], h = b.bbox[3] - b.bbox[1];
+    if (!TEXT.has(b.type)) return [top, h];
+    const pt = b.style?.pt || 11, leading = b.format?.leading;
+    const lines = leading ? Math.max(1, Math.round((h - pt) / leading) + 1) : 1;
+    const tall = leading ? lines * leading : pt * 1.15;
+    return [top + (h - tall) / 2, tall];
+  };
   const flow = (blocks, bottom, left, out) => {
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
-      const before = b.bbox ? Math.max(0, Math.min(H * 0.6, b.bbox[1] - bottom - (b.style?.pt || 10) * 0.3)) : 6;
+      const [at, tall] = b.bbox ? placed(b) : [bottom + 6, 0];
+      const before = Math.max(0, Math.min(H * 0.6, at - bottom));
       // Blocks side by side (logo + letterhead, two signatures): a borderless table row.
       const row = [b];
       while (b.bbox && i + row.length < blocks.length) {
@@ -399,12 +416,12 @@ export async function toDocx(doc) {
         const widths = row.map((r, k) => Math.round(((k + 1 < row.length ? row[k + 1].bbox[0] : r.bbox[2] + 24) - r.bbox[0] + 12) * TWIP));
         const cells = row.map((r, k) => `<w:tc><w:tcPr><w:tcW w:w="${widths[k]}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${blockXml({ ...r, format: { ...(r.format || {}), indent: 0 } }, 0) || "<w:p/>"}</w:tc>`).join("");
         out.push(`<w:p>${docxParaProps({}, before)}</w:p><w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblInd w:w="${Math.round(Math.max(0, x0 - left) * TWIP)}" w:type="dxa"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map((s) => `<w:${s} w:val="nil"/>`).join("")}</w:tblBorders></w:tblPr><w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>`);
-        bottom = Math.max(...row.map((r) => r.bbox[3]));
+        bottom = Math.max(bottom + before, Math.max(...row.map((r) => r.bbox[3])));
         i += row.length - 1;
         continue;
       }
       out.push(blockXml(b, before));
-      if (b.bbox) bottom = b.bbox[3];
+      bottom += before + tall;
     }
     return bottom;
   };
