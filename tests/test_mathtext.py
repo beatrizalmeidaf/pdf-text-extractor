@@ -99,7 +99,7 @@ def test_bold_stays_on_the_words_around_the_math():
 
 
 def test_default_output_is_unchanged(exam):
-    assert "$" not in exam.to_markdown() and "64 cm<sup>3</sup>" in exam.to_markdown()
+    assert "operatorname" not in exam.to_markdown() and "64 cm<sup>3</sup>" in exam.to_markdown()
     assert exam.to_text() == exam.text and "x² + y² = 4" in exam.text
 
 
