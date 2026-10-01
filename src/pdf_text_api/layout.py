@@ -635,7 +635,7 @@ def build_spans(chars: list[Char], fonts: list[FontInfo]) -> list[Span]:
                 piece = []
             piece.append(ch)
         spans.append(Span(piece, fonts))
-    return _join_markers(spans)
+    return _join_markers(spans, gaps)
 
 
 def _compose_accents(line: list[Char]) -> list[Char]:
@@ -764,8 +764,9 @@ def _is_marker(text: str) -> bool:
     return (len(t) == 1 and t in BULLETS) or bool(_ENUM.fullmatch(t))
 
 
-def _join_markers(spans: list[Span]) -> list[Span]:
-    """'•' or '1.' followed by the item text (hanging indent) is one span, not two columns."""
+def _join_markers(spans: list[Span], gaps=()) -> list[Span]:
+    """'•' or '1.' followed by the item text (hanging indent) is one span, not two columns.
+    (An equation number at the end of a column is not the marker of the next column's line.)"""
     out: list[Span] = []
     i = 0
     while i < len(spans):
@@ -773,7 +774,8 @@ def _join_markers(spans: list[Span]) -> list[Span]:
         if i + 1 < len(spans) and _is_marker(s.text):
             nxt = spans[i + 1]
             same_row = min(s.y1, nxt.y1) - max(s.y0, nxt.y0) > min(s.height, nxt.height) * 0.4
-            if same_row and 0 <= nxt.x0 - s.x1 < max(s.size, 6) * 4:
+            over_gutter = any(s.x1 <= g0 + 2.5 and nxt.x0 >= g1 - 2.5 for g0, g1 in gaps)
+            if same_row and not over_gutter and 0 <= nxt.x0 - s.x1 < max(s.size, 6) * 4:
                 nxt.chars[0].space = 2
                 out.append(Span(s.chars + nxt.chars, s.fonts))
                 i += 2
