@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pdf-text-api"
+name = "papero-extract"
 version = "3.0.0"
 description = "papero — PDF to Markdown, JSON and tables: structured PDF extraction (reading order, tables, formulas, images, bounding boxes) on Apache Tika. Python library, CLI, REST API and browser app."
 readme = "README.md"

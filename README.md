@@ -77,7 +77,7 @@ Also: accents drawn as separate glyphs in LaTeX PDFs (`Computa¸ca˜o` → `Comp
 ## Quick start
 
 ```bash
-pip install pdf-text-api
+pip install papero-extract
 ```
 
 ```python
@@ -276,4 +276,4 @@ If papero saves you time, **a ⭐ helps other people find it.**
 
 <sub>**Keywords:** PDF to Markdown · PDF to JSON · PDF to Word · PDF to Excel · PDF table extraction · PDF parser · document parsing · layout analysis · reading order · multi-column PDF · formula extraction · LaTeX · bounding boxes · OCR · Apache Tika · PDFium · pdf.js · RAG preprocessing · LLM document loader · Docling alternative · PyMuPDF alternative · converter PDF para Markdown, Word e Excel · extrair tabelas de PDF · extrair texto de PDF mantendo a formatação · OCR de PDF escaneado</sub>
 
-<sub>MIT © Beatriz Almeida · package and imports keep the name `pdf-text-api` / `pdf_text_api` for compatibility.</sub>
+<sub>MIT © Beatriz Almeida · published as `papero-extract` on PyPI; imports and CLI keep the name `pdf-text-api` / `pdf_text_api` for compatibility.</sub>
