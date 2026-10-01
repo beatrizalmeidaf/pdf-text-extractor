@@ -2309,10 +2309,22 @@ def lines_to_blocks(lines: list[Line], body: float) -> list[Block]:
                 indent_ok = ln.x0 >= first.x0 + size * 0.3
                 edge = edges.get(id(prev), max(g.x1 for g in group))
                 wrapped = ln.x0 >= first.x0 - 2 and prev.x1 >= edge - size * 2
+                # Nor is it further below the item than the items are from each other: the
+                # line after the last option, one per line, is the text that follows them.
+                after_item = len(group) == 1 and blocks and blocks[-1].type == "list_item"
+                above = None
+                if after_item and idx >= 2 and lines[idx - 1] is prev:
+                    above = _gap(lines[idx - 2], prev)
+                apart = (
+                    above is not None
+                    and gap > size * PARA_GAP_EM
+                    and gap - above > max(1.5, gap * 0.2)
+                )
                 # (A first line cut short on purpose is a heading line, not an item.)
                 continues = (
                     continues
                     and (indent_ok or wrapped)
+                    and not apart
                     and not _hard_break(prev, ln, edges)
                     # ("A. Related Work" in italics, then its paragraph in upright type.)
                     and not (group[0].italic and not ln.italic)
