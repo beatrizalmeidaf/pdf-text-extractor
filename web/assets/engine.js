@@ -232,7 +232,9 @@ function typesetMath(chars, g) {
       ...g.ink.filter((b) => x0 - sz * 1.2 <= b[0] && b[2] <= x0 + 2 && b[1] < bottom && b[3] > top).map((b) => [b[0], b[3] - b[1]]),
     ];
     const hook = strokes.some(([, h]) => h >= sz * 0.4) ? strokes.map(([x]) => x) : [];
-    const closed = g.hrules.some(([yy, a, b]) => bottom - sz * 0.3 <= yy && yy <= bottom + sz * 0.5 && Math.min(b, x1) - Math.max(a, x0) >= (x1 - x0) * 0.5);
+    // (A rule far wider than the bar is the frame around the whole line, not its floor.)
+    const closed = g.hrules.some(([yy, a, b]) => bottom - sz * 0.3 <= yy && yy <= bottom + sz * 0.5 &&
+      Math.min(b, x1) - Math.max(a, x0) >= (x1 - x0) * 0.5 && a >= x0 - sz * 2 && b <= x1 + sz * 2);
     if (!hook.length || Math.min(...hook) > x0 - sz * 0.12 || closed) continue;
     drawn.push([Math.min(...hook) - 1, top - 2, x1 + 1, bottom + 2]);
     const group = [...den].sort((a, b) => chars[a].x0 - chars[b].x0);
@@ -1131,6 +1133,11 @@ function listStart(text) {
   const m = ENUM.exec(t);
   return m ? m[0] : null;
 }
+// A word and what it stands for, nothing else: "8 = Eight", "Size = 64".
+function namedValue(text) {
+  const pair = /^(\S+)\s*=\s*(\S+)$/.exec(text.trim());
+  return !!pair && [pair[1], pair[2]].some((s) => /^\p{L}{4,}$/u.test(s.replace(/[-–]/g, "")));
+}
 function formulaLike(line) {
   const text = line.text;
   const compact = text.replace(/ /g, "");
@@ -1147,7 +1154,18 @@ function formulaLike(line) {
   if (!numbered && plain.filter((w) => !MATH_WORDS.has(w)).length >= 3) return false;
   const score = mathScore(text);
   return line.math >= 0.4 || score >= 0.22 || (line.hasScripts && score >= 0.1) ||
-    (text.includes("=") && words.length <= 1 && /[\p{L}\p{N}]/u.test(compact));
+    (text.includes("=") && words.length <= 1 && !namedValue(text) && /[\p{L}\p{N}]/u.test(compact));
+}
+const RELATIONS = new Set("=→⇒⇔←↔⇌≤≥<>≈≡∼");
+const LEADING_OPERATORS = new Set("=+-−–×·÷→⇒⇔≤≥<>≈≡∼,");
+// Two formula lines, one under the other: the second is an equation of its own (the next
+// reaction, the next given value) when both state something and it does not pick up where the
+// first stopped — no operator at the break. Limits under a sum are smaller type.
+function newEquation(prev, ln, size) {
+  const first = [...prev.text.trim()], second = [...ln.text.trim()];
+  if (Math.abs(ln.size - prev.size) > size * 0.15) return false;
+  if (!first.some((c) => RELATIONS.has(c)) || !second.some((c) => RELATIONS.has(c))) return false;
+  return !LEADING_OPERATORS.has(second[0]) && !LEADING_OPERATORS.has(first[first.length - 1]);
 }
 const NEWLINE = "\n"; // a line break the author made on purpose, kept inside a paragraph
 // A break is intentional when the next line's first word would have fitted on this one.
@@ -1354,7 +1372,7 @@ function linesToBlocks(lines) {
       const sameStyle = Math.abs(ln.size - prev.size) <= size * 0.15 && ln.bold === prev.bold;
       let cont = sameLeading(gap, size, group, lines, idx) && overlap > 0 && sameStyle;
       if (kind === "code") cont = thisKind === "code" && gap <= size * 1.2 && overlap > -size;
-      else if (kind === "formula") cont = thisKind === "formula" && gap <= size * 0.9;
+      else if (kind === "formula") cont = thisKind === "formula" && gap <= size * 0.9 && !newEquation(prev, ln, size);
       else if (["list_item", "formula", "code"].includes(thisKind)) cont = false;
       else if (kind === "list_item") {
         // Wrapped item text: indented under the text, or flush with the marker right after a full line.
