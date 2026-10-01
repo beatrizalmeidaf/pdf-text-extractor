@@ -81,7 +81,7 @@ pip install papero-extract
 ```
 
 ```python
-from pdf_text_api import extract
+from papero_extract import extract
 
 doc = extract("paper.pdf")
 print(doc.to_markdown())
@@ -93,7 +93,7 @@ Or skip the install: **[open the browser app](https://beatrizalmeidaf.github.io/
 <summary><b>More Python</b> — tables, formulas, positions, images, options</summary>
 
 ```python
-from pdf_text_api import extract, extract_text
+from papero_extract import extract, extract_text
 
 doc = extract("paper.pdf", images=True)
 
@@ -127,12 +127,12 @@ extract_text("contract.pdf").text  # fastest: clean text only
 <summary><b>CLI</b></summary>
 
 ```bash
-pdf-text-api extract paper.pdf -o paper.md --images   # Markdown + images/ folder
-pdf-text-api extract paper.pdf -o paper.json          # format from the extension
-pdf-text-api extract paper.pdf -f csv -o tables.csv   # tables only
-pdf-text-api extract paper.pdf -p 1-5 -f html
-pdf-text-api extract paper.pdf --fast                 # clean text only
-pdf-text-api serve --port 8000                        # API + browser app
+papero-extract extract paper.pdf -o paper.md --images   # Markdown + images/ folder
+papero-extract extract paper.pdf -o paper.json          # format from the extension
+papero-extract extract paper.pdf -f csv -o tables.csv   # tables only
+papero-extract extract paper.pdf -p 1-5 -f html
+papero-extract extract paper.pdf --fast                 # clean text only
+papero-extract serve --port 8000                        # API + browser app
 ```
 
 </details>
@@ -257,7 +257,7 @@ The browser app runs the same algorithm ported to JavaScript on pdf.js, and CI c
 <summary><b>Development</b></summary>
 
 ```bash
-git clone https://github.com/beatrizalmeidaf/papero-pdf-text-extractor.git && cd pdf-text-extractor
+git clone https://github.com/beatrizalmeidaf/papero-pdf-text-extractor.git && cd papero-pdf-text-extractor
 pip install -e ".[dev]"
 pytest -q                                   # includes real-world regressions
 ruff check src tests && ruff format --check src tests
@@ -265,7 +265,7 @@ npm install --prefix tests/js && python tests/js/expected.py tests/js/out && nod
 python -m http.server -d web                # browser app at http://localhost:8000
 ```
 
-`src/pdf_text_api/` is the Python engine, API and CLI · `web/` is the browser app (GitHub Pages) · `tests/js/` checks the two engines agree · `benchmarks/` downloads the dataset and draws the chart.
+`src/papero_extract/` is the Python engine, API and CLI · `web/` is the browser app (GitHub Pages) · `tests/js/` checks the two engines agree · `benchmarks/` downloads the dataset and draws the chart.
 
 </details>
 
@@ -277,4 +277,4 @@ If papero saves you time, **a ⭐ helps other people find it.**
 
 <sub>**Keywords:** PDF to Markdown · PDF to JSON · PDF to Word · PDF to Excel · PDF table extraction · PDF parser · document parsing · layout analysis · reading order · multi-column PDF · formula extraction · LaTeX · bounding boxes · OCR · Apache Tika · PDFium · pdf.js · RAG preprocessing · LLM document loader · Docling alternative · PyMuPDF alternative · converter PDF para Markdown, Word e Excel · extrair tabelas de PDF · extrair texto de PDF mantendo a formatação · OCR de PDF escaneado</sub>
 
-<sub>MIT © Beatriz Almeida · published as `papero-extract` on PyPI; imports and CLI keep the name `pdf-text-api` / `pdf_text_api` for compatibility.</sub>
+<sub>MIT © Beatriz Almeida · `pip install papero-extract` · `import papero_extract`</sub>

@@ -1,4 +1,4 @@
-// Browser layout engine — a port of src/pdf_text_api/layout.py on top of pdf.js.
+// Browser layout engine — a port of src/papero_extract/layout.py on top of pdf.js.
 // Emits the same JSON as the Python library (schema "pdf-text-api/document@1"),
 // so the viewer and the exporters work the same with either engine.
 // Thresholds share their names with layout.py: keep both files in sync.

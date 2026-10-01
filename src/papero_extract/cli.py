@@ -1,12 +1,12 @@
 """Command line interface.
 
-pdf-text-api extract artigo.pdf                       # Markdown no terminal
-pdf-text-api extract artigo.pdf -o artigo.md --images # + pasta images/ ao lado
-pdf-text-api extract artigo.pdf -f json -o artigo.json
-pdf-text-api extract artigo.pdf -f csv -o tabelas.csv # só as tabelas
-pdf-text-api extract contrato.docx -f text            # qualquer formato que o Tika lê
-pdf-text-api extract artigo.pdf --fast                # só texto, via Tika (mais rápido)
-pdf-text-api serve --port 8000
+papero-extract extract artigo.pdf                       # Markdown no terminal
+papero-extract extract artigo.pdf -o artigo.md --images # + pasta images/ ao lado
+papero-extract extract artigo.pdf -f json -o artigo.json
+papero-extract extract artigo.pdf -f csv -o tabelas.csv # só as tabelas
+papero-extract extract contrato.docx -f text            # qualquer formato que o Tika lê
+papero-extract extract artigo.pdf --fast                # só texto, via Tika (mais rápido)
+papero-extract serve --port 8000
 """
 
 from __future__ import annotations
@@ -126,12 +126,12 @@ def _serve(args: argparse.Namespace) -> int:
     try:
         import uvicorn
     except ImportError:
-        print("Instale os extras da API: pip install 'pdf-text-api[api]'", file=sys.stderr)
+        print("Instale os extras da API: pip install 'papero-extract[api]'", file=sys.stderr)
         return 1
     if args.workers:
         os.environ["PTE_WORKERS"] = str(args.workers)
     uvicorn.run(
-        "pdf_text_api.api:app",
+        "papero_extract.api:app",
         host=args.host,
         port=args.port,
         proxy_headers=True,
@@ -145,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
-        prog="pdf-text-api",
+        prog="papero-extract",
         description="papero — extração estruturada de PDFs e documentos (Apache Tika + PDFium).",
     )
     parser.add_argument("--version", action="version", version=__version__)

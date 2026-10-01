@@ -1,12 +1,12 @@
 """Structured PDF & document extraction on Apache Tika — Python library, CLI and HTTP API.
 
->>> from pdf_text_api import extract, extract_text
+>>> from papero_extract import extract, extract_text
 >>> doc = extract("artigo.pdf", images=True)   # structure: order, tables, figures, formulas
 >>> doc.to_markdown()
 >>> extract_text("contrato.pdf").text           # fastest: plain text via Tika
 """
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 from .cleaning import CleanOptions, clean_pages  # noqa: E402
 from .extractor import (  # noqa: E402

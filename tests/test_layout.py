@@ -3,9 +3,9 @@
 import pytest
 
 from fixtures import unicode_font
-from pdf_text_api import extract
-from pdf_text_api.render import md_table, tables_csv
-from pdf_text_api.symbols import latex_escape, normalize_char
+from papero_extract import extract
+from papero_extract.render import md_table, tables_csv
+from papero_extract.symbols import latex_escape, normalize_char
 
 
 @pytest.fixture(scope="module")
@@ -268,7 +268,7 @@ def test_chemical_indices_and_state_of_matter(exam):
 
 # ----------------------------------------------------------------- columns, TeX fonts
 def test_gutter_between_two_columns_despite_a_spanning_title():
-    from pdf_text_api.columns import area_of, bands, columns
+    from papero_extract.columns import area_of, bands, columns
 
     title = (120, 60, 480, 80)
     left = [(50, 100 + 60 * k, 295, 150 + 60 * k) for k in range(8)]
@@ -283,13 +283,13 @@ def test_gutter_between_two_columns_despite_a_spanning_title():
 
 
 def test_single_column_has_no_gutter():
-    from pdf_text_api.columns import columns
+    from papero_extract.columns import columns
 
     assert len(columns([(50, 100 + 30 * k, 560, 125 + 30 * k) for k in range(10)])) == 1
 
 
 def test_tex_font_codes_without_tounicode():
-    from pdf_text_api.tex_fonts import NOT, is_tex_producer, tex_char, tex_encoding
+    from papero_extract.tex_fonts import NOT, is_tex_producer, tex_char, tex_encoding
 
     assert is_tex_producer("pdfTeX-1.40.21") and not is_tex_producer("Acrobat Distiller 11.0")
     assert tex_encoding("ABCDEF+CMMI10") == "oml" and tex_encoding("TimesNewRomanPSMT") == ""

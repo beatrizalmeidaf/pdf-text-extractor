@@ -1,4 +1,4 @@
-// Renderers and file exporters for the document JSON — a port of src/pdf_text_api/render.py
+// Renderers and file exporters for the document JSON — a port of src/papero_extract/render.py
 // plus XLSX/DOCX writers (plain OOXML zipped with JSZip, no heavy dependencies).
 
 import { bands } from "./columns.js";

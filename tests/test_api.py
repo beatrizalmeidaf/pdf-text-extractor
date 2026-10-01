@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from pdf_text_api.api import create_app
-from pdf_text_api.config import Settings
+from papero_extract.api import create_app
+from papero_extract.config import Settings
 
 
 @pytest.fixture(scope="module")
@@ -111,8 +111,8 @@ def test_worker_crash_recovers():
     import asyncio
     import os
 
-    from pdf_text_api.api import ApiError, WorkerPool
-    from pdf_text_api.extractor import worker_warmup
+    from papero_extract.api import ApiError, WorkerPool
+    from papero_extract.extractor import worker_warmup
 
     async def scenario():
         pool = WorkerPool(1)

@@ -1,13 +1,13 @@
 import pytest
 
-from pdf_text_api import (
+from papero_extract import (
     EncryptedPDFError,
     InvalidPDFError,
     PageRangeError,
     TooManyPagesError,
     extract_text,
 )
-from pdf_text_api.extractor import parse_page_spec
+from papero_extract.extractor import parse_page_spec
 
 
 def test_extracts_and_cleans(sample_pdf):

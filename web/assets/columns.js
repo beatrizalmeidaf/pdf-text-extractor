@@ -1,4 +1,4 @@
-// Text columns of a page, from block boxes alone — a port of src/pdf_text_api/columns.py.
+// Text columns of a page, from block boxes alone — a port of src/papero_extract/columns.py.
 // A gutter is a vertical strip that (almost) no text crosses, with text on both sides; a
 // title or figure spanning the columns may cross it. The layout pass measures alignment
 // against the block's own column, and the exporters turn columns into HTML/Word columns.

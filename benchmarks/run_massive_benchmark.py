@@ -9,7 +9,7 @@ import fitz  # pymupdf
 import pypdf
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-from pdf_text_api.extractor import extract_text
+from papero_extract.extractor import extract_text
 
 import glob
 
@@ -40,7 +40,7 @@ def bench_pypdf(file_path):
             text += page.extract_text() or ""
         return len(text), len(reader.pages)
 
-def bench_pdf_text_api(file_path):
+def bench_papero_extract(file_path):
     res = extract_text(file_path)
     return len(res.text), res.page_count
 
@@ -81,12 +81,12 @@ def bench_docling(file_path):
 def run_benchmarks(pdf_files):
     print("\nAquecendo a JVM do Tika...")
     if pdf_files:
-        bench_pdf_text_api(pdf_files[0])
+        bench_papero_extract(pdf_files[0])
         
     tools = {
         "PyMuPDF": bench_pymupdf,
         "PyPDF": bench_pypdf,
-        "PDF Text Extractor (Nosso)": bench_pdf_text_api,
+        "PDF Text Extractor (Nosso)": bench_papero_extract,
         "pdfplumber": bench_pdfplumber,
         "Docling (IBM)": bench_docling
     }

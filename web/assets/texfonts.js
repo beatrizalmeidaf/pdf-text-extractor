@@ -1,4 +1,4 @@
-// TeX math fonts without a ToUnicode map — the browser side of src/pdf_text_api/tex_fonts.py.
+// TeX math fonts without a ToUnicode map — the browser side of src/papero_extract/tex_fonts.py.
 //
 // A paper set in Computer Modern often ships no ToUnicode table, so a reader sees raw glyph
 // codes: "ϵ" comes out as control character 0x0F, "≠" as "6=", "⟨x, y⟩" as "hx, yi".

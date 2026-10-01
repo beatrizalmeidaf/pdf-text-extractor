@@ -1,6 +1,6 @@
 import pytest
 
-from pdf_text_api.cleaning import RAW, CleanOptions, clean_pages, is_page_number
+from papero_extract.cleaning import RAW, CleanOptions, clean_pages, is_page_number
 
 
 @pytest.mark.parametrize(

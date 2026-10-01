@@ -61,10 +61,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t pdf-text-api .
+      - run: docker build -t papero-extract .
       - name: Smoke test
         run: |
-          docker run -d -p 8000:8000 --name api pdf-text-api
+          docker run -d -p 8000:8000 --name api papero-extract
           for i in $(seq 1 60); do curl -sf localhost:8000/health | grep -q '"tika":"ok"' && break; sleep 2; done
           curl -sf localhost:8000/health
           curl -sf -F file=@web/assets/exemplo.pdf "localhost:8000/v1/extract?format=markdown" | tee out.md

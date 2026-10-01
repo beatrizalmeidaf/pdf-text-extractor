@@ -1,6 +1,6 @@
 """HTTP API: `POST /v1/extract` + the web app at `/`.
 
-Run with:  uvicorn pdf_text_api.api:app  (or `pdf-text-api serve`)
+Run with:  uvicorn papero_extract.api:app  (or `papero-extract serve`)
 
 Latency plan for one request:
   * Tika is called from long-lived threads of this process (keep-alive connections);
@@ -59,7 +59,7 @@ from .layout import LayoutOptions, analyze_pages
 from .render import tables_csv
 from .tika_client import TikaUnavailableError, get_client
 
-log = logging.getLogger("pdf_text_api")
+log = logging.getLogger("papero_extract")
 
 REPO_URL = "https://github.com/beatrizalmeidaf/papero-pdf-text-extractor"
 PAGES_URL = "https://beatrizalmeidaf.github.io/papero-pdf-text-extractor/"

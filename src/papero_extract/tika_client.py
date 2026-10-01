@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import requests
 
-log = logging.getLogger("pdf_text_api.tika")
+log = logging.getLogger("papero_extract.tika")
 
 DEFAULT_URL = "http://127.0.0.1:9998"
 # JVM flags for a short-request server: class-data sharing for startup, throughput GC.

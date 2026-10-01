@@ -28,7 +28,7 @@ from .model import Block, Document
 from .tika_client import TikaUnavailableError, get_client
 from .tika_xhtml import TikaDoc, page_texts, parse_xhtml, to_pages
 
-log = logging.getLogger("pdf_text_api")
+log = logging.getLogger("papero_extract")
 
 Source = str | os.PathLike | bytes
 
@@ -217,7 +217,7 @@ def extract_text(
 ) -> ExtractionResult:
     """Fast plain-text extraction with Apache Tika (any format Tika reads).
 
-    >>> from pdf_text_api import extract_text
+    >>> from papero_extract import extract_text
     >>> extract_text("relatorio.pdf", pages="1-3").text
     """
     started = time.perf_counter()
@@ -265,7 +265,7 @@ def extract(
     "force" OCRs everything, "off" never does.
     `tika=False` skips Tika entirely (no metadata/OCR; PDFs only).
 
-    >>> from pdf_text_api import extract
+    >>> from papero_extract import extract
     >>> doc = extract("artigo.pdf", images=True)
     >>> print(doc.to_markdown())
     >>> doc.tables[0].rows
